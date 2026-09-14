@@ -17,6 +17,9 @@ jobs:
       - name: Descomprimir aplicación
         run: unzip -o Finanzas_Definitiva_Flutter_v2.zip
 
+      - name: Añadir eliminación segura
+        run: python3 apply_delete_support.py
+
       - name: Instalar Flutter
         uses: subosito/flutter-action@v2
         with:
