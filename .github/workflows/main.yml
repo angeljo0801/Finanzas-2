@@ -25,7 +25,7 @@ jobs:
 
       - name: Preparar proyecto Android
         working-directory: finanzas_definitiva
-        run: flutter create . --platforms=android --org com.angel.finanzas
+        run: flutter create . --platforms=android --org com.angel.finanzas.nueva sed -i 's/android:label="finanzas_definitiva"/android:label="Finanzas"/' android/app/src/main/AndroidManifest.xml
 
       - name: Descargar dependencias
         working-directory: finanzas_definitiva
