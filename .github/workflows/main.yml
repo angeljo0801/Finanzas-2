@@ -29,8 +29,8 @@ jobs:
 
       - name: Cambiar nombre visible
         working-directory: finanzas_definitiva
-        run: sed -i 's/android:label="finanzas_definitiva"/android:label="Finanzas"/' android/app/src/main/AndroidManifest.xmlfinanzas_definitiva"/android:label="Finanzas"/' android/app/src/main/AndroidManifest.xml
-
+        run: sed -i s/finanzas_definitiva/Finanzas/g android/app/src/main/AndroidManifest.xml
+      
       - name: Descargar dependencias
         working-directory: finanzas_definitiva
         run: flutter pub get
