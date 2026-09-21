@@ -10,6 +10,7 @@ import 'manager_pages.dart';
 import 'finance_bot.dart';
 import 'finance_ai_chat.dart';
 import 'finance_ai_settings.dart';
+import 'finance_backup_service.dart';
 
 void main() => runApp(const FinanceApp());
 
@@ -31,6 +32,13 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int index = 0, revision = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    FinanceBackupService.autoBackupIfDue().catchError((_) {});
+  }
+
   void refresh() => setState(() => revision++);
   @override
   Widget build(BuildContext context) {
@@ -193,8 +201,15 @@ class _SettingsPageState extends State<SettingsPage> {
       const Divider(height:24),
       ListTile(leading:const Icon(Icons.receipt_long_outlined),title:const Text('Libro diario profesional'),subtitle:const Text('Revisar o crear débitos y créditos manualmente'),onTap:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>JournalPage(onChanged:widget.onChanged)))),
       ListTile(leading:const Icon(Icons.account_tree_outlined),title:const Text('Catálogo de cuentas'),onTap:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>const AccountsPage()))),
-      ListTile(leading:const Icon(Icons.backup_outlined),title:const Text('Crear copia de seguridad'),subtitle:const Text('Exporta todos los datos a un archivo JSON'),onTap:()=>shareBackup(context)),
-      ListTile(leading:const Icon(Icons.restore),title:const Text('Restaurar copia de seguridad'),subtitle:const Text('Recupera tus datos desde un archivo JSON'),onTap:()async{if(await restoreBackup(context))widget.onChanged();}),
+      ListTile(
+        leading:const Icon(Icons.backup_outlined),
+        title:const Text('Copias de seguridad'),
+        subtitle:const Text('Copia automática diaria, copia manual y restauración'),
+        onTap:()=>Navigator.push(
+          context,
+          MaterialPageRoute(builder:(_)=>const FinanceBackupPage()),
+        ),
+      ),
       ListTile(leading:const Icon(Icons.science_outlined),title:const Text('Cargar demostración'),onTap:demo),
       const ListTile(leading:Icon(Icons.lock_outline),title:Text('Datos privados y offline'),subtitle:Text('Tus datos permanecen en este dispositivo')),
       OutlinedButton.icon(onPressed:clear,icon:const Icon(Icons.delete_forever),label:const Text('Borrar transacciones')),

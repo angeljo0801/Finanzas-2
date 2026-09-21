@@ -187,19 +187,62 @@ class AppDatabase {
     });
   }
 
+  bool _sensitiveSettingKey(String key) {
+    final k=key.toLowerCase();
+    return k.contains('api_key') ||
+        k.contains('apikey') ||
+        k.endsWith('_key') ||
+        k.contains('password') ||
+        k.contains('secret') ||
+        k.contains('access_token') ||
+        k.contains('refresh_token');
+  }
+
   Future<String> backupJson() async {
-    final d=await db; final names=['accounts','transactions','journal_lines','settings','budgets','debts','remittances']; final data=<String,Object?>{'format':'finanzas_definitiva','version':3,'created_at':DateTime.now().toIso8601String()};
+    final d=await db;
+    const names=['accounts','transactions','journal_lines','budgets','debts','remittances'];
+    final data=<String,Object?>{
+      'format':'finanzas_definitiva',
+      'version':4,
+      'created_at':DateTime.now().toIso8601String(),
+      'api_credentials_included':false,
+    };
     for(final name in names) data[name]=await d.query(name);
+    final settingsRows=await d.query('settings');
+    data['settings']=settingsRows.where((row){
+      final key=(row['key']??'').toString();
+      return !_sensitiveSettingKey(key);
+    }).toList();
     return const JsonEncoder.withIndent('  ').convert(data);
   }
 
   Future<void> restoreJson(String source) async {
     final decoded=jsonDecode(source);
     if(decoded is! Map<String,dynamic>||decoded['format']!='finanzas_definitiva') throw const FormatException('Este archivo no es un respaldo válido');
-    final d=await db,names=['accounts','transactions','journal_lines','settings','budgets','debts','remittances'];
+    final d=await db;
+    const names=['accounts','transactions','journal_lines','settings','budgets','debts','remittances'];
+    final preservedSecrets=<Map<String,Object?>>[];
+    final currentSettings=await d.query('settings');
+    for(final row in currentSettings){
+      final key=(row['key']??'').toString();
+      if(_sensitiveSettingKey(key)) preservedSecrets.add(Map<String,Object?>.from(row));
+    }
     await d.transaction((b)async{
       for(final name in names.reversed) await b.delete(name);
-      for(final name in names){final rows=decoded[name];if(rows is List){for(final row in rows){if(row is Map)await b.insert(name,Map<String,Object?>.from(row),conflictAlgorithm:ConflictAlgorithm.replace);}}}
+      for(final name in names){
+        final rows=decoded[name];
+        if(rows is List){
+          for(final row in rows){
+            if(row is! Map) continue;
+            final mapped=Map<String,Object?>.from(row);
+            if(name=='settings' && _sensitiveSettingKey((mapped['key']??'').toString())) continue;
+            await b.insert(name,mapped,conflictAlgorithm:ConflictAlgorithm.replace);
+          }
+        }
+      }
+      for(final row in preservedSecrets){
+        await b.insert('settings',row,conflictAlgorithm:ConflictAlgorithm.replace);
+      }
     });
   }
   Future<void> loadDemo() async {
