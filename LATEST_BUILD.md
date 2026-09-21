@@ -2,8 +2,9 @@
 
 Checked: 2026-09-20
 
-- Latest verified APK artifact: **Finanzas-Definitiva-v2.4.6.apk**
-- Library package: `Finanzas-Collapsible-AI-Panel.zip`
-- Artifact build time: 2026-09-20 23:52
-- Repository source is being synchronized forward from the older source baseline.
-- Do not downgrade the app to an older APK when updating this repository.
+- App: **Finanzas**
+- Latest successful GitHub Actions run: **35552098807**
+- Artifact: **Finanzas-Definitiva-v2-APK**
+- Artifact size: **27,464,502 bytes**
+- Latest source branch: `main`
+- The current repository includes the newer AI bundle deployment fixes. Do not replace it with older APK-era source.
