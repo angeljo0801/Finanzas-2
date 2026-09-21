@@ -1,0 +1,47 @@
+name: Export current source snapshot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/source_snapshot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct current app source
+        run: |
+          rm -rf finanzas_definitiva source_snapshot
+          unzip -o Finanzas_Definitiva_Flutter_v2.zip
+          python3 apply_delete_support.py
+          cp overrides/lib/database.dart overrides/lib/manager_pages.dart finanzas_definitiva/lib/
+          cp overrides/pubspec.yaml finanzas_definitiva/pubspec.yaml
+          python3 apply_ai_flex.py
+
+      - name: Export text source needed for maintenance
+        run: |
+          mkdir -p source_snapshot/lib source_snapshot/android
+          cp -R finanzas_definitiva/lib/. source_snapshot/lib/
+          cp finanzas_definitiva/pubspec.yaml source_snapshot/pubspec.yaml
+          if [ -d finanzas_definitiva/android ]; then
+            cp -R finanzas_definitiva/android/. source_snapshot/android/
+          fi
+
+      - name: Commit snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source_snapshot
+          if git diff --cached --quiet; then
+            echo "No source changes"
+          else
+            git commit -m "chore: export current source snapshot [skip ci]"
+            git push
+          fi
