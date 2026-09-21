@@ -21,28 +21,10 @@ jobs:
         run: python3 apply_delete_support.py
 
       - name: Aplicar mejora de deudas y abonos parciales
-        run: cp overrides/lib/database.dart overrides/lib/manager_pages.dart finanzas_definitiva/lib/ && cp overrides/pubspec.yaml finanzas_definitiva/pubspec.yaml
+        run: cp overrides/lib/database.dart overrides/lib/manager_pages.dart finanzas_definitiva/lib/
 
-      - name: Inspeccionar código del asistente
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          needles = ['Asistente financiero','Soy tu asistente financiero','Revisar y crear asiento','¿Cómo creo un asiento?','llama','ollama','prompt']
-          for p in Path('finanzas_definitiva/lib').rglob('*.dart'):
-              s = p.read_text(encoding='utf-8', errors='ignore')
-              if any(n.lower() in s.lower() for n in needles):
-                  print(f'===== FILE: {p} =====')
-                  lines = s.splitlines()
-                  hits = [i for i,l in enumerate(lines) if any(n.lower() in l.lower() for n in needles)]
-                  shown=set()
-                  for i in hits:
-                      a=max(0,i-45); b=min(len(lines),i+90)
-                      for j in range(a,b):
-                          if j not in shown:
-                              print(f'{j+1:04d}: {lines[j]}')
-                              shown.add(j)
-                  print('===== END FILE =====')
-          PY
+      - name: Aplicar IA flexible y mensajes copiables
+        run: python3 apply_ai_flex.py
 
       - name: Instalar Flutter
         uses: subosito/flutter-action@v2
@@ -54,9 +36,20 @@ jobs:
         working-directory: finanzas_definitiva
         run: flutter create . --platforms=android --org com.angel.finanzas.nueva
 
-      - name: Cambiar nombre visible
+      - name: Preparar Android para IA local y online
         working-directory: finanzas_definitiva
-        run: sed -i s/finanzas_definitiva/Finanzas/g android/app/src/main/AndroidManifest.xml
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('android/app/src/main/AndroidManifest.xml')
+          s=p.read_text()
+          if 'android.permission.INTERNET' not in s:
+              s=s.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">','<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>')
+          s=s.replace('android:label="finanzas_definitiva"','android:label="Finanzas"')
+          if 'android:usesCleartextTraffic=' not in s:
+              s=s.replace('<application\n        android:label=', '<application\n        android:usesCleartextTraffic="true"\n        android:label=')
+          p.write_text(s)
+          PY
       
       - name: Descargar dependencias
         working-directory: finanzas_definitiva
