@@ -24,6 +24,7 @@ jobs:
           cp overrides/lib/database.dart overrides/lib/manager_pages.dart finanzas_definitiva/lib/
           cp overrides/pubspec.yaml finanzas_definitiva/pubspec.yaml
           python3 apply_ai_flex.py
+          python3 apply_backup_update.py
 
       - name: Export text source needed for maintenance
         run: |
