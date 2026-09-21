@@ -6,6 +6,16 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+env:
+  FINANZAS_APPLICATION_ID: com.angel.finanzas.nueva.finanzas_definitiva
+  ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+  ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+  ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+  ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -32,9 +42,63 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Preparar proyecto Android
+      - name: Preparar proyecto Android con ID fijo
         working-directory: finanzas_definitiva
-        run: flutter create . --platforms=android --org com.angel.finanzas.nueva
+        run: |
+          flutter create . --platforms=android --org com.angel.finanzas.nueva
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          expected = os.environ["FINANZAS_APPLICATION_ID"]
+          candidates = [
+              Path("android/app/build.gradle.kts"),
+              Path("android/app/build.gradle"),
+          ]
+          path = next((p for p in candidates if p.exists()), None)
+          if path is None:
+              raise SystemExit("No se encontró el build.gradle de Android")
+
+          text = path.read_text(encoding="utf-8")
+          if path.suffix == ".kts":
+              text, n1 = re.subn(
+                  r'applicationId\s*=\s*"[^"]+"',
+                  f'applicationId = "{expected}"',
+                  text,
+                  count=1,
+              )
+              text, n2 = re.subn(
+                  r'namespace\s*=\s*"[^"]+"',
+                  f'namespace = "{expected}"',
+                  text,
+                  count=1,
+              )
+          else:
+              text, n1 = re.subn(
+                  r'applicationId\s+["\'][^"\']+["\']',
+                  f'applicationId "{expected}"',
+                  text,
+                  count=1,
+              )
+              text, n2 = re.subn(
+                  r'namespace\s+["\'][^"\']+["\']',
+                  f'namespace "{expected}"',
+                  text,
+                  count=1,
+              )
+
+          if n1 != 1:
+              raise SystemExit("No se pudo fijar applicationId")
+          if n2 != 1:
+              raise SystemExit("No se pudo fijar namespace")
+
+          path.write_text(text, encoding="utf-8")
+          Path("android/FINANZAS_APPLICATION_ID.txt").write_text(
+              expected + "\n", encoding="utf-8"
+          )
+          print("Application ID fijo:", expected)
+          PY
 
       - name: Preparar Android para IA local y online
         working-directory: finanzas_definitiva
@@ -50,7 +114,7 @@ jobs:
               s=s.replace('<application\n        android:label=', '<application\n        android:usesCleartextTraffic="true"\n        android:label=')
           p.write_text(s)
           PY
-      
+
       - name: Descargar dependencias
         working-directory: finanzas_definitiva
         run: flutter pub get
@@ -63,12 +127,44 @@ jobs:
         working-directory: finanzas_definitiva
         run: flutter test
 
-      - name: Compilar APK
+      - name: Compilar APK con versionCode creciente
         working-directory: finanzas_definitiva
-        run: flutter build apk --release
+        run: flutter build apk --release --build-number "${GITHUB_RUN_NUMBER}"
+
+      - name: Aplicar firma persistente
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        working-directory: finanzas_definitiva
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/finanzas-release.jks
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$APKSIGNER"
+          "$APKSIGNER" sign             --ks android/finanzas-release.jks             --ks-key-alias "$ANDROID_KEY_ALIAS"             --ks-pass "pass:$ANDROID_STORE_PASSWORD"             --key-pass "pass:$ANDROID_KEY_PASSWORD"             --out build/app/outputs/flutter-apk/app-release-stable.apk             build/app/outputs/flutter-apk/app-release.apk
+          mv build/app/outputs/flutter-apk/app-release-stable.apk build/app/outputs/flutter-apk/app-release.apk
+          "$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/app-release.apk
+          rm -f android/finanzas-release.jks
+
+      - name: Avisar si falta firma persistente
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 == '' }}
+        run: |
+          echo "::warning::La APK se compiló sin la clave persistente. El applicationId y versionCode ya están fijados, pero Android puede rechazar futuras actualizaciones hasta configurar los 4 secrets de firma."
+
+      - name: Guardar identidad de compilación
+        working-directory: finanzas_definitiva
+        run: |
+          {
+            echo "applicationId=$FINANZAS_APPLICATION_ID"
+            echo "buildNumber=$GITHUB_RUN_NUMBER"
+            if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+              echo "signing=persistent"
+            else
+              echo "signing=temporary-debug"
+            fi
+          } > build/app/outputs/flutter-apk/BUILD_IDENTITY.txt
 
       - name: Subir APK
         uses: actions/upload-artifact@v4
         with:
           name: Finanzas-Definitiva-v2-APK
-          path: finanzas_definitiva/build/app/outputs/flutter-apk/app-release.apk
+          path: |
+            finanzas_definitiva/build/app/outputs/flutter-apk/app-release.apk
+            finanzas_definitiva/build/app/outputs/flutter-apk/BUILD_IDENTITY.txt
