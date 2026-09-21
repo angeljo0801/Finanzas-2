@@ -1,0 +1,44 @@
+name: Inspect Finanzas Assistant Source
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/inspect.yml'
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unzip source
+        run: unzip -o Finanzas_Definitiva_Flutter_v2.zip
+      - name: Apply current overrides
+        run: |
+          python3 apply_delete_support.py
+          cp overrides/lib/database.dart overrides/lib/manager_pages.dart finanzas_definitiva/lib/
+          cp overrides/pubspec.yaml finanzas_definitiva/pubspec.yaml
+      - name: Collect assistant source
+        run: |
+          mkdir -p inspect_out
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          root=Path('finanzas_definitiva/lib')
+          needles=['Asistente financiero','Soy tu asistente financiero','Revisar y crear asiento','¿Cómo creo un asiento?','prompt','ollama','gemini','openai']
+          found=[]
+          for p in root.rglob('*.dart'):
+              s=p.read_text(encoding='utf-8', errors='ignore')
+              if any(n.lower() in s.lower() for n in needles):
+                  rel=p.relative_to(root)
+                  out=Path('inspect_out')/rel
+                  out.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(p,out)
+                  found.append(str(rel))
+          Path('inspect_out/FILES.txt').write_text('\n'.join(found), encoding='utf-8')
+          PY
+      - name: Upload inspection files
+        uses: actions/upload-artifact@v4
+        with:
+          name: finanzas-assistant-source
+          path: inspect_out
