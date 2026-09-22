@@ -24,6 +24,21 @@ jobs:
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
+      - name: Verificar firma persistente
+        shell: bash
+        run: |
+          missing=0
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_STORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Falta el secret $name"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::No se publicará una APK con firma temporal. Configura los 4 GitHub Actions secrets de firma."
+            exit 1
+          fi
+
       - name: Descomprimir aplicación
         run: unzip -o Finanzas_Definitiva_Flutter_v2.zip
 
@@ -145,7 +160,6 @@ jobs:
         run: flutter build apk --release --build-number "${GITHUB_RUN_NUMBER}"
 
       - name: Aplicar firma persistente
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         working-directory: finanzas_definitiva
         run: |
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/finanzas-release.jks
@@ -156,22 +170,13 @@ jobs:
           "$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/app-release.apk
           rm -f android/finanzas-release.jks
 
-      - name: Avisar si falta firma persistente
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 == '' }}
-        run: |
-          echo "::warning::La APK se compiló sin la clave persistente. El applicationId y versionCode ya están fijados, pero Android puede rechazar futuras actualizaciones hasta configurar los 4 secrets de firma."
-
       - name: Guardar identidad de compilación
         working-directory: finanzas_definitiva
         run: |
           {
             echo "applicationId=$FINANZAS_APPLICATION_ID"
             echo "buildNumber=$GITHUB_RUN_NUMBER"
-            if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
-              echo "signing=persistent"
-            else
-              echo "signing=temporary-debug"
-            fi
+            echo "signing=persistent"
           } > build/app/outputs/flutter-apk/BUILD_IDENTITY.txt
 
       - name: Subir APK
