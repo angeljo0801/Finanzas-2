@@ -93,6 +93,7 @@ jobs:
           sed 's/^package com\.angel\.finanzas\.finanzas_definitiva/package com.angel.finanzas.nueva.finanzas_definitiva/'             negocio-current/.github/LocalAiManagerBridge.kt             > finanzas_definitiva/android/app/src/main/kotlin/com/angel/finanzas/nueva/finanzas_definitiva/LocalAiManagerBridge.kt
 
           python3 negocio-current/.github/patch_finanzas.py
+          python3 .github/patch_finanzas_compat_v4.py
 
           python3 - <<'PY'
           import os, re
