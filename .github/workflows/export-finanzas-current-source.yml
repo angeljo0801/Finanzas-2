@@ -1,0 +1,34 @@
+name: Export Finanzas v2.5.5 source for diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/export-finanzas-current-source.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct current v2.5.5 source
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/angeljo0801/Negocio.git negocio-current
+          cat negocio-current/.github/archive-parts/part-* > Finanzas_Definitiva_Flutter_v3.zip
+          unzip -o Finanzas_Definitiva_Flutter_v3.zip
+          cp negocio-current/.github/*.dart finanzas_definitiva/lib/ || true
+      - name: Upload diagnostic source
+        uses: actions/upload-artifact@v4
+        with:
+          name: Finanzas-v2.5.5-diagnostic-source
+          path: |
+            finanzas_definitiva/lib/main.dart
+            finanzas_definitiva/lib/database.dart
+            finanzas_definitiva/lib/manager_pages.dart
+            finanzas_definitiva/lib/dashboard.dart
+          if-no-files-found: warn
+          retention-days: 1
