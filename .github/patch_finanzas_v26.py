@@ -308,6 +308,18 @@ if save_button in p and "Eliminar cuenta creada" not in p:
 
 personal.write_text(p, encoding="utf-8")
 
+
+# Banks used by the business are cash equivalents for cash-flow/daily-position
+# reports. Remittances move value from physical cash into a bank account.
+for report_file in [root / "lib/accounting_engine.dart", root / "lib/daily_position_page.dart"]:
+    if report_file.exists():
+        rs = report_file.read_text(encoding="utf-8")
+        rs = rs.replace(
+            "accounts.where((a) => a.subtype == 'cash').map((a) => a.id).toSet()",
+            "accounts.where((a) => const {'cash','bank','personal_bank'}.contains(a.subtype)).map((a) => a.id).toSet()",
+        )
+        report_file.write_text(rs, encoding="utf-8")
+
 # Version for this release.
 ps = pub.read_text(encoding="utf-8")
 ps = re.sub(r"^version:.*$", "version: 2.6.0+26", ps, flags=re.M)
