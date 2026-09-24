@@ -131,9 +131,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: flutter test integration_test/finance_user_journey_test.dart -d emulator-5554 --reporter expanded
-        env:
-          working-directory: finanzas_definitiva
+          script: cd finanzas_definitiva && flutter test integration_test/finance_user_journey_test.dart -d emulator-5554 --reporter expanded
 
       - name: Guardar informe QA
         if: always()
