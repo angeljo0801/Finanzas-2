@@ -253,8 +253,41 @@ void main() {
       closeTo(600, .01),
       reason: 'Solo el saldo realmente usado de la tarjeta debe ser pasivo.',
     );
+    await FinanceV26Store.unlinkPersonalCard(cardId);
+    expect(
+      await _businessLiabilityBalance(businessCardId),
+      closeTo(0, .01),
+      reason: 'Desvincular la tarjeta debe retirar únicamente el pasivo derivado de sync.',
+    );
 
-    // 7) Remesa mía: Efectivo baja, banco sube principal+ganancia.
+    // 7) Desvincular el último banco también revierte el saldo derivado.
+    final unlinkBankPersonal =
+        await PersonalFinanceStore.createFinancialAccount(
+      name: 'QA Desvincular banco',
+      bankName: 'QA Unlink',
+      kind: 'checking',
+      initialBalance: 33,
+    );
+    final unlinkBankBusiness = await FinanceV26Store.ensureBusinessAccount(
+      'QAUNL',
+      'QA Cuenta unlink',
+      'asset',
+      'bank',
+    );
+    await FinanceV26Store.linkPersonalBank(
+      unlinkBankPersonal,
+      unlinkBankBusiness,
+    );
+    await FinanceV26Store.reconcileSharedBalances();
+    expect(await _businessAssetBalance('QAUNL'), closeTo(33, .01));
+    await FinanceV26Store.unlinkPersonalBank(unlinkBankPersonal);
+    expect(
+      await _businessAssetBalance('QAUNL'),
+      closeTo(0, .01),
+      reason: 'Desvincular el último banco no puede dejar un activo fantasma.',
+    );
+
+    // 8) Remesa mía: Efectivo baja, banco sube principal+ganancia.
     final businessBank = await AppDatabase.instance.accountId('1015');
     final beforeCash = await _businessAssetBalance('1010');
     final beforeBank = await _businessAssetBalance('1015');
@@ -270,7 +303,7 @@ void main() {
     expect(afterCash - beforeCash, closeTo(-100, .01));
     expect(afterBank - beforeBank, closeTo(105, .01));
 
-    // 8) Recorrido visual por las pantallas principales.
+    // 9) Recorrido visual por las pantallas principales.
     await tester.pumpWidget(const FinanceApp());
     await tester.pumpAndSettle(const Duration(seconds: 2));
     expect(find.text('Mi Empresa'), findsOneWidget);
@@ -290,7 +323,7 @@ void main() {
     expect(find.text('Deudas'), findsWidgets);
     expect(find.text('Remesas'), findsWidgets);
 
-    // 9) El formulario de Intereses pide tasa y tipo.
+    // 10) El formulario de Intereses pide tasa y tipo.
     await tester.tap(find.text('Deudas').last);
     await tester.pumpAndSettle();
     final fab = find.byType(FloatingActionButton);
@@ -299,7 +332,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Yo debo pagar'), findsOneWidget);
 
-    final dropdowns = find.byType(DropdownButtonFormField<int>);
+    final dropdowns = find.byWidgetPredicate(
+      (widget) => widget is DropdownButtonFormField,
+      description: 'dropdown de categoría de deuda',
+    );
     expect(dropdowns, findsOneWidget);
     await tester.tap(dropdowns.first);
     await tester.pumpAndSettle();
@@ -314,7 +350,7 @@ void main() {
     await tester.tap(find.text('Cancelar'));
     await tester.pumpAndSettle();
 
-    // 10) Remesas muestran los dos tipos y banco destino.
+    // 11) Remesas muestran los dos tipos y banco destino.
     await tester.tap(find.text('Remesas').last);
     await tester.pumpAndSettle();
     await tester.tap(find.byType(FloatingActionButton));
@@ -327,7 +363,7 @@ void main() {
     await tester.tap(find.text('Cancelar'));
     await tester.pumpAndSettle();
 
-    // 11) Configuración contiene las reglas nuevas.
+    // 12) Configuración contiene las reglas nuevas.
     await tester.tap(find.text('Más'));
     await tester.pumpAndSettle();
     expect(find.text('Regla de remesas'), findsOneWidget);
