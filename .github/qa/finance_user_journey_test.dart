@@ -331,10 +331,16 @@ void main() {
     await tester.tap(fab);
     await tester.pumpAndSettle();
     expect(find.text('Yo debo pagar'), findsOneWidget);
+    // "Nota opcional" solo existe en el flujo V26; si falta, la app cayó
+    // accidentalmente en la pantalla de deudas antigua.
+    expect(find.text('Nota opcional'), findsOneWidget);
 
-    final debtCategory = find.byKey(const Key('debt_category_dropdown'));
-    expect(debtCategory, findsOneWidget);
-    await tester.tap(debtCategory);
+    final payableCategories = await FinanceV26Store.categories('payable');
+    expect(payableCategories, isNotEmpty);
+    final firstCategoryName = payableCategories.first['name'].toString();
+    final currentCategoryLabel = find.text(firstCategoryName).last;
+    expect(currentCategoryLabel, findsOneWidget);
+    await tester.tap(currentCategoryLabel);
     await tester.pumpAndSettle();
     final interestOption = find.text('Intereses').last;
     expect(interestOption, findsOneWidget);
