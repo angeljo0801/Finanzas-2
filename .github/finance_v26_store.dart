@@ -324,6 +324,35 @@ class FinanceV26Store {
     return charge * r.agentOwnerSharePercent / 100;
   }
 
+  static Future<int> _ensurePersonalBankMirror(
+    int personalAccountId,
+  ) async {
+    final d = await AppDatabase.instance.db;
+    final rows = await d.query(
+      'personal_accounts',
+      columns: ['name', 'bank_name'],
+      where: 'id=?',
+      whereArgs: [personalAccountId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      throw const FormatException('La cuenta personal seleccionada ya no existe.');
+    }
+    final row = rows.first;
+    final accountName = row['name']?.toString().trim() ?? '';
+    final bankName = row['bank_name']?.toString().trim() ?? '';
+    final label = [
+      if (bankName.isNotEmpty) bankName,
+      if (accountName.isNotEmpty) accountName,
+    ].join(' · ');
+    return ensureBusinessAccount(
+      'PB$personalAccountId',
+      label.isEmpty ? 'Banco personal vinculado' : label,
+      'asset',
+      'personal_bank',
+    );
+  }
+
   static Future<List<Map<String, dynamic>>> businessLiquidAccounts() async {
     await ensureSchema();
     return (await AppDatabase.instance.db).rawQuery('''
@@ -681,7 +710,7 @@ class FinanceV26Store {
       );
       targetBank = linked.isNotEmpty
           ? linked.first['business_account_id'] as int
-          : await AppDatabase.instance.accountId('1060');
+          : await _ensurePersonalBankMirror(personalAccountId!);
     }
 
     final remittanceId = await d.transaction((tx) async {
