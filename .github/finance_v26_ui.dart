@@ -314,6 +314,7 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
                   onChanged: (_) => setD(() {}),
                 ),
                 DropdownButtonFormField<int>(
+                  key: const Key('debt_category_dropdown'),
                   initialValue: category,
                   isExpanded: true,
                   decoration: InputDecoration(
