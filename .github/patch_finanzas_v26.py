@@ -322,7 +322,7 @@ for report_file in [root / "lib/accounting_engine.dart", root / "lib/daily_posit
 
 # Version for this release.
 ps = pub.read_text(encoding="utf-8")
-ps = re.sub(r"^version:.*$", "version: 2.6.0+26", ps, flags=re.M)
+ps = re.sub(r"^version:.*$", "version: 2.6.1+27", ps, flags=re.M)
 pub.write_text(ps, encoding="utf-8")
 
-print("Finanzas Definitiva v2.6 patch applied")
+print("Finanzas Definitiva v2.6.1 patch applied")
