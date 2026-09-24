@@ -37,11 +37,13 @@ Configuración > **Regla de remesas**.
 - Porcentaje personalizado opcional para una remesa concreta.
 
 ### Remesas de agentes
-- Límite y tarifa fija predeterminados.
-- Límite y tarifa fija individual por agente.
-- Un porcentaje de ganancia del propietario común para todos los agentes.
-- Debajo del límite: el porcentaje del propietario se calcula sobre la tarifa fija.
-- Desde el límite: el porcentaje del propietario se calcula sobre el importe de la remesa.
+- Límite, tarifa fija y porcentaje por arriba del límite configurables.
+- Cada agente puede tener su propio límite, tarifa fija y porcentaje de cobro.
+- Valor inicial del porcentaje que cobra el agente por arriba del límite: **5%**.
+- La parte del propietario es independiente del porcentaje que cobra el agente y queda en **50%** por defecto.
+- Debajo del límite: el agente cobra la tarifa fija y el propietario gana el 50% de esa tarifa.
+- Desde el límite: el agente cobra su porcentaje (por ejemplo 5%) sobre la remesa y el propietario gana el 50% de esa comisión.
+- Ejemplo: remesa 200, comisión del agente 5% = 10; parte del propietario 50% = 5.
 
 ## Contabilidad de remesas
 - La remesa reduce **Efectivo**.
@@ -72,3 +74,7 @@ Configuración > **Sincronización Personal ↔ Negocio**.
 - Application ID conservado: `com.angel.finanzas.nueva.finanzas_definitiva`.
 - Firma persistente conservada para permitir actualización sobre la instalación oficial.
 - Versión: **2.6.0**.
+
+
+## Ajuste v2.6.1
+Se separó explícitamente **el porcentaje que cobra el agente** de **la parte de esa ganancia que corresponde al propietario**. Ya no se interpreta 50% como comisión directa sobre el principal.
