@@ -952,9 +952,51 @@ class FinanceV26Store {
     await reconcileSharedBalances();
   }
 
+  static Future<void> _deleteGeneratedSyncTransactions(
+    String referenceLike,
+  ) async {
+    final d = await AppDatabase.instance.db;
+    await d.transaction((tx) async {
+      final rows = await tx.query(
+        'transactions',
+        columns: ['id'],
+        where: 'reference LIKE ?',
+        whereArgs: [referenceLike],
+      );
+      for (final row in rows) {
+        await tx.delete(
+          'journal_lines',
+          where: 'transaction_id=?',
+          whereArgs: [row['id']],
+        );
+      }
+      await tx.delete(
+        'transactions',
+        where: 'reference LIKE ?',
+        whereArgs: [referenceLike],
+      );
+    });
+  }
+
   static Future<void> unlinkPersonalCard(int personalAccountId) async {
     await ensureSchema();
-    await (await AppDatabase.instance.db).delete(
+    final d = await AppDatabase.instance.db;
+    final link = await d.query(
+      'v26_business_cards',
+      columns: ['business_account_id'],
+      where: 'personal_account_id=?',
+      whereArgs: [personalAccountId],
+      limit: 1,
+    );
+    if (link.isEmpty) return;
+
+    // Los asientos V26SYNC:CARD son derivados. Quitarlos al desvincular
+    // devuelve la cuenta empresarial a su saldo independiente sin tocar
+    // movimientos manuales o reales.
+    await _deleteGeneratedSyncTransactions(
+      'V26SYNC:CARD:$personalAccountId:%',
+    );
+    await d.delete(
       'v26_business_cards',
       where: 'personal_account_id=?',
       whereArgs: [personalAccountId],
@@ -992,11 +1034,31 @@ class FinanceV26Store {
 
   static Future<void> unlinkPersonalBank(int personalAccountId) async {
     await ensureSchema();
-    await (await AppDatabase.instance.db).delete(
+    final d = await AppDatabase.instance.db;
+    final link = await d.query(
+      'v26_personal_business_links',
+      columns: ['business_account_id'],
+      where: 'personal_account_id=?',
+      whereArgs: [personalAccountId],
+      limit: 1,
+    );
+    if (link.isEmpty) return;
+    final businessId = link.first['business_account_id'] as int;
+
+    await d.delete(
       'v26_personal_business_links',
       where: 'personal_account_id=?',
       whereArgs: [personalAccountId],
     );
+
+    // Rehacer desde cero únicamente los ajustes derivados de sincronización
+    // de esta cuenta empresarial. Los movimientos reales del negocio quedan.
+    await _deleteGeneratedSyncTransactions(
+      'V26SYNC:BANK:$businessId:%',
+    );
+    if (await syncEnabled()) {
+      await reconcileSharedBalances();
+    }
   }
 
   static Future<void> transferPersonalBusiness({
