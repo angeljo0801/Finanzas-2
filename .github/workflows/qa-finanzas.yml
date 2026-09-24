@@ -1,0 +1,147 @@
+name: QA autónomo Finanzas Definitiva
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/finance_v26_store.dart"
+      - ".github/finance_v26_ui.dart"
+      - ".github/patch_finanzas_v26.py"
+      - ".github/patch_personal_wallet_v262.py"
+      - ".github/qa/**"
+      - ".github/workflows/qa-finanzas.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finanzas-qa-autonomo
+  cancel-in-progress: true
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Reconstruir Finanzas Definitiva actual
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/angeljo0801/Negocio.git negocio-current
+          cat negocio-current/.github/archive-parts/part-* > Finanzas_Definitiva_Flutter_v3.zip
+          echo "05d465ef3bfb2802934e2b68991e96bdb1e491ad3b825fe9c779805b5b6e1970  Finanzas_Definitiva_Flutter_v3.zip" | sha256sum --check
+          unzip -o Finanzas_Definitiva_Flutter_v3.zip
+
+          cp negocio-current/.github/finance_bot.dart finanzas_definitiva/lib/finance_bot.dart
+          cp negocio-current/.github/finance_ai_service.dart finanzas_definitiva/lib/finance_ai_service.dart
+          cp negocio-current/.github/finance_ai_settings.dart finanzas_definitiva/lib/finance_ai_settings.dart
+          cp negocio-current/.github/finance_ai_chat.dart finanzas_definitiva/lib/finance_ai_chat.dart
+          cp negocio-current/.github/finance_knowledge.dart finanzas_definitiva/lib/finance_knowledge.dart
+          cp negocio-current/.github/finance_learning.dart finanzas_definitiva/lib/finance_learning.dart
+          cp negocio-current/.github/finance_backup.dart finanzas_definitiva/lib/finance_backup.dart
+          cp negocio-current/.github/finance_tool_router.dart finanzas_definitiva/lib/finance_tool_router.dart
+          cp negocio-current/.github/personal_finance.dart finanzas_definitiva/lib/personal_finance.dart
+          cp negocio-current/.github/paqueteria_sync.dart finanzas_definitiva/lib/paqueteria_sync.dart
+          cp .github/finance_v26_store.dart finanzas_definitiva/lib/finance_v26_store.dart
+          cp .github/finance_v26_ui.dart finanzas_definitiva/lib/finance_v26_ui.dart
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Regenerar Android y aplicar parches
+        shell: bash
+        run: |
+          cd finanzas_definitiva
+          flutter create . --platforms=android --org com.angel.finanzas.nueva
+          cd ..
+          mkdir -p finanzas_definitiva/android/app/src/main/kotlin/com/angel/finanzas/nueva/finanzas_definitiva
+          sed 's/^package com\.angel\.finanzas\.finanzas_definitiva/package com.angel.finanzas.nueva.finanzas_definitiva/'             negocio-current/.github/finance_main_activity.kt             > finanzas_definitiva/android/app/src/main/kotlin/com/angel/finanzas/nueva/finanzas_definitiva/MainActivity.kt
+          sed 's/^package com\.angel\.finanzas\.finanzas_definitiva/package com.angel.finanzas.nueva.finanzas_definitiva/'             negocio-current/.github/LocalAiManagerBridge.kt             > finanzas_definitiva/android/app/src/main/kotlin/com/angel/finanzas/nueva/finanzas_definitiva/LocalAiManagerBridge.kt
+
+          python3 negocio-current/.github/patch_finanzas.py
+          python3 .github/patch_finanzas_compat_v4.py
+          python3 .github/patch_finanzas_v26.py
+          python3 .github/patch_personal_wallet_v262.py
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("finanzas_definitiva/pubspec.yaml")
+          s = p.read_text(encoding="utf-8")
+          if "integration_test:" not in s:
+              marker = "dev_dependencies:\n"
+              s = s.replace(
+                  marker,
+                  marker + "  integration_test:\n    sdk: flutter\n",
+                  1,
+              )
+          p.write_text(s, encoding="utf-8")
+
+          gradle = Path("finanzas_definitiva/android/app/build.gradle.kts")
+          g = gradle.read_text()
+          expected = "com.angel.finanzas.nueva.finanzas_definitiva"
+          g = re.sub(r'namespace\s*=\s*"[^"]+"', f'namespace = "{expected}"', g, count=1)
+          g = re.sub(r'applicationId\s*=\s*"[^"]+"', f'applicationId = "{expected}"', g, count=1)
+          gradle.write_text(g)
+          PY
+
+          mkdir -p finanzas_definitiva/test finanzas_definitiva/integration_test
+          cp .github/qa/finance_logic_qa_test.dart finanzas_definitiva/test/finance_logic_qa_test.dart
+          cp .github/qa/finance_user_journey_test.dart finanzas_definitiva/integration_test/finance_user_journey_test.dart
+
+      - name: Descargar dependencias
+        working-directory: finanzas_definitiva
+        run: flutter pub get
+
+      - name: Análisis estático
+        working-directory: finanzas_definitiva
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings lib test integration_test
+
+      - name: QA contable y lógica
+        working-directory: finanzas_definitiva
+        run: flutter test test/finance_logic_qa_test.dart --reporter expanded
+
+      - name: Auditoría de producto
+        shell: bash
+        run: |
+          python3 .github/qa/audit_finanzas.py
+          cat QA_REPORT.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Habilitar KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Recorrido Android como usuario
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: flutter test integration_test/finance_user_journey_test.dart -d emulator-5554 --reporter expanded
+        env:
+          working-directory: finanzas_definitiva
+
+      - name: Guardar informe QA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Finanzas-QA-Report
+          path: |
+            QA_REPORT.md
+            QA_REPORT.json
+          if-no-files-found: ignore
+          retention-days: 30
