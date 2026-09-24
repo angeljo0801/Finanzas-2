@@ -65,6 +65,41 @@ if (
         "huérfano. Este control permanece como advertencia si falta esa limpieza.",
     )
 
+if (
+    "business_share_percent REAL NOT NULL DEFAULT 100" in store
+    and "businessSharePercent" not in ui
+):
+    finding(
+        "MEDIUM",
+        "Tarjetas Personal ↔ Negocio",
+        "La tarjeta vinculada se refleja al 100% y no permite clasificar movimientos personales vs. negocio",
+        "El modelo tiene un porcentaje de participación, pero la interfaz no lo expone "
+        "y tampoco existe clasificación por movimiento. Para una tarjeta mixta, el negocio "
+        "puede terminar mostrando deuda personal como deuda empresarial.",
+    )
+
+if (
+    "v26_personal_business_links" in store
+    and "share_percent" not in store.split("CREATE TABLE IF NOT EXISTS v26_personal_business_links", 1)[1].split(")", 1)[0]
+):
+    finding(
+        "MEDIUM",
+        "Bancos Personal ↔ Negocio",
+        "La sincronización compartida todavía trabaja por saldo completo",
+        "Una cuenta personal vinculada se espeja completa. Falta poder marcar movimientos "
+        "como Personal, Negocio o dividirlos cuando la misma cuenta se usa para ambos.",
+    )
+
+if "whereArgs: [kind == 'payable' ? 'expense' : 'revenue']" in store:
+    finding(
+        "MEDIUM",
+        "Deudas y préstamos",
+        "La pantalla de deudas trata la contrapartida como gasto o ingreso",
+        "Esto funciona para cuentas por pagar/cobrar, pero no para el principal de un préstamo. "
+        "Conviene un flujo Préstamo separado que registre banco/caja contra Préstamo bancario "
+        "y deje los intereses en su propia categoría.",
+    )
+
 if "amount: interest ? interestValue : principal" in ui:
     finding(
         "INFO",
@@ -87,6 +122,15 @@ if "debtPayments" in store and "accountId('1010')" in store:
         "Pagos de deudas",
         "Los pagos parciales usan Efectivo como origen/destino fijo",
         "Conviene permitir elegir Efectivo, banco del negocio o cuenta personal vinculada para que el asiento represente de dónde salió o entró el dinero realmente.",
+    )
+
+if "TextField(controller: agent" in ui:
+    finding(
+        "LOW",
+        "Remesas de agentes",
+        "El agente se escribe como texto libre al registrar la remesa",
+        "Un selector basado en agentes existentes reduciría duplicados por diferencias de nombre "
+        "y haría más confiables los reportes por agente.",
     )
 
 report = {
