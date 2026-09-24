@@ -332,12 +332,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Yo debo pagar'), findsOneWidget);
 
-    final dropdowns = find.byWidgetPredicate(
-      (widget) => widget is DropdownButtonFormField,
-      description: 'dropdown de categoría de deuda',
-    );
-    expect(dropdowns, findsOneWidget);
-    await tester.tap(dropdowns.first);
+    final debtCategory = find.byKey(const Key('debt_category_dropdown'));
+    expect(debtCategory, findsOneWidget);
+    await tester.tap(debtCategory);
     await tester.pumpAndSettle();
     final interestOption = find.text('Intereses').last;
     expect(interestOption, findsOneWidget);
