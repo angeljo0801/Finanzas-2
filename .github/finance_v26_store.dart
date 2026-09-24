@@ -611,10 +611,95 @@ class FinanceV26Store {
   static Future<void> setSyncEnabled(bool value) async {
     await ensureSchema();
     await AppDatabase.instance.setSetting(syncKey, value ? '1' : '0');
+    if (value) await reconcileSharedBalances();
+  }
+
+  static Future<void> reconcileSharedBalances() async {
+    await ensureSchema();
+    if ((await AppDatabase.instance.setting(syncKey)) != '1') return;
+    final d = await AppDatabase.instance.db;
+    final adjustment = await AppDatabase.instance.accountId('3040');
+
+    final bankLinks = await d.query(
+      'v26_personal_business_links',
+      where: 'enabled=1',
+    );
+    for (final link in bankLinks) {
+      final personalId = link['personal_account_id'] as int;
+      final businessId = link['business_account_id'] as int;
+      final p = await d.rawQuery(
+        'SELECT COALESCE(SUM(debit-credit),0) v FROM personal_journal_lines WHERE account_id=?',
+        [personalId],
+      );
+      final b = await d.rawQuery(
+        'SELECT COALESCE(SUM(debit-credit),0) v FROM journal_lines WHERE account_id=?',
+        [businessId],
+      );
+      final target = (p.first['v'] as num).toDouble();
+      final current = (b.first['v'] as num).toDouble();
+      final diff = target - current;
+      if (diff.abs() <= .005) continue;
+      final ref = 'V26SYNC:BANK:$personalId:${DateTime.now().microsecondsSinceEpoch}';
+      await AppDatabase.instance.addTransaction(
+        JournalTransaction(
+          date: DateTime.now(),
+          description: 'Sincronización de banco personal compartido',
+          reference: ref,
+          cashFlowClass: 'noncash',
+          lines: diff > 0
+              ? [
+                  JournalLine(accountId: businessId, debit: diff),
+                  JournalLine(accountId: adjustment, credit: diff),
+                ]
+              : [
+                  JournalLine(accountId: adjustment, debit: -diff),
+                  JournalLine(accountId: businessId, credit: -diff),
+                ],
+        ),
+      );
+    }
+
+    final cardLinks = await d.query('v26_business_cards');
+    for (final link in cardLinks) {
+      final personalId = link['personal_account_id'] as int;
+      final businessId = link['business_account_id'] as int;
+      final share = ((link['business_share_percent'] as num?) ?? 100).toDouble();
+      final p = await d.rawQuery(
+        'SELECT COALESCE(SUM(credit-debit),0) v FROM personal_journal_lines WHERE account_id=?',
+        [personalId],
+      );
+      final b = await d.rawQuery(
+        'SELECT COALESCE(SUM(credit-debit),0) v FROM journal_lines WHERE account_id=?',
+        [businessId],
+      );
+      final target = (p.first['v'] as num).toDouble() * share / 100;
+      final current = (b.first['v'] as num).toDouble();
+      final diff = target - current;
+      if (diff.abs() <= .005) continue;
+      final ref = 'V26SYNC:CARD:$personalId:${DateTime.now().microsecondsSinceEpoch}';
+      await AppDatabase.instance.addTransaction(
+        JournalTransaction(
+          date: DateTime.now(),
+          description: 'Sincronización de tarjeta personal usada por el negocio',
+          reference: ref,
+          cashFlowClass: 'noncash',
+          lines: diff > 0
+              ? [
+                  JournalLine(accountId: adjustment, debit: diff),
+                  JournalLine(accountId: businessId, credit: diff),
+                ]
+              : [
+                  JournalLine(accountId: businessId, debit: -diff),
+                  JournalLine(accountId: adjustment, credit: -diff),
+                ],
+        ),
+      );
+    }
   }
 
   static Future<List<Map<String, dynamic>>> personalCards() async {
     await ensureSchema();
+    await reconcileSharedBalances();
     final d = await AppDatabase.instance.db;
     return d.rawQuery('''
       SELECT a.*,
@@ -653,6 +738,7 @@ class FinanceV26Store {
       ON CONFLICT(personal_account_id) DO UPDATE SET
         business_account_id=excluded.business_account_id
     ''', [personalAccountId, businessId, DateTime.now().toIso8601String()]);
+    await reconcileSharedBalances();
   }
 
   static Future<void> unlinkPersonalCard(int personalAccountId) async {
@@ -690,6 +776,7 @@ class FinanceV26Store {
         business_account_id=excluded.business_account_id,
         enabled=1
     ''', [personalAccountId, businessAccountId, 'bank', 1, DateTime.now().toIso8601String()]);
+    await reconcileSharedBalances();
   }
 
   static Future<void> unlinkPersonalBank(int personalAccountId) async {
