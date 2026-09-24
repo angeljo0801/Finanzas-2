@@ -34,6 +34,16 @@ Future<double> _businessLiabilityBalance(int accountId) async {
   return (rows.first['v'] as num).toDouble();
 }
 
+Future<double> _personalAssetBalance(int accountId) async {
+  final d = await AppDatabase.instance.db;
+  final rows = await d.rawQuery(
+    'SELECT COALESCE(SUM(debit-credit),0) v '
+    'FROM personal_journal_lines WHERE account_id=?',
+    [accountId],
+  );
+  return (rows.first['v'] as num).toDouble();
+}
+
 Future<Map<String, dynamic>> _personalById(int id) async {
   final d = await AppDatabase.instance.db;
   final rows = await d.query(
@@ -123,7 +133,35 @@ void main() {
         .toList();
     expect((debtRows.single['paid_amount'] as num).toDouble(), closeTo(0, .001));
 
-    // 3) Sincronización de varias cuentas personales al mismo banco empresarial.
+    // 3) Elegir "Banco mío" actualiza la cuenta personal aunque la
+    // sincronización global esté apagada, sin mezclar ese saldo con 1060.
+    final remitPersonalId =
+        await PersonalFinanceStore.createFinancialAccount(
+      name: 'QA Banco remesa',
+      bankName: 'QA Personal',
+      kind: 'checking',
+      initialBalance: 0,
+    );
+    await FinanceV26Store.setSyncEnabled(false);
+    await FinanceV26Store.createRemittance(
+      client: 'QA Remesa a banco personal',
+      kind: 'own',
+      principal: 50,
+      bankScope: 'personal',
+      personalAccountId: remitPersonalId,
+    );
+    expect(
+      await _personalAssetBalance(remitPersonalId),
+      closeTo(55, .01),
+      reason: 'Banco mío debe recibir principal + ganancia aunque sync esté apagado.',
+    );
+    expect(
+      await _businessAssetBalance('PB$remitPersonalId'),
+      closeTo(55, .01),
+      reason: 'La remesa explícita debe usar un espejo empresarial independiente.',
+    );
+
+    // 4) Sincronización de varias cuentas personales al mismo banco empresarial.
     final a = await PersonalFinanceStore.createFinancialAccount(
       name: 'QA Ana',
       bankName: 'QA Banco',
@@ -154,7 +192,39 @@ void main() {
       reason: 'El dashboard del negocio debe sumar todas las cuentas personales vinculadas.',
     );
 
-    // 4) Tarjetas: límite no es deuda; solo el saldo usado se sincroniza.
+    expect(
+      await _businessAssetBalance('PB$remitPersonalId'),
+      closeTo(55, .01),
+      reason: 'Sincronizar otras cuentas no debe borrar una remesa personal explícita.',
+    );
+
+    // 5) Eliminar una cuenta vinculada revierte y limpia el vínculo huérfano.
+    final disposable = await PersonalFinanceStore.createFinancialAccount(
+      name: 'QA Eliminar',
+      bankName: 'QA Temporal',
+      kind: 'savings',
+      initialBalance: 77,
+    );
+    final disposableBusiness = await FinanceV26Store.ensureBusinessAccount(
+      'QADEL',
+      'QA Banco temporal',
+      'asset',
+      'bank',
+    );
+    await FinanceV26Store.linkPersonalBank(disposable, disposableBusiness);
+    await FinanceV26Store.reconcileSharedBalances();
+    expect(await _businessAssetBalance('QADEL'), closeTo(77, .01));
+    await PersonalFinanceStore.deleteFinancialAccount(disposable);
+    await FinanceV26Store.reconcileSharedBalances();
+    expect(await _businessAssetBalance('QADEL'), closeTo(0, .01));
+    final liveLinks = await FinanceV26Store.links();
+    expect(
+      liveLinks.any((r) => r['personal_account_id'] == disposable),
+      isFalse,
+      reason: 'No deben quedar vínculos huérfanos después de reconciliar.',
+    );
+
+    // 6) Tarjetas: límite no es deuda; solo el saldo usado se sincroniza.
     final cardId = await PersonalFinanceStore.createFinancialAccount(
       name: 'QA Credit',
       bankName: 'QA Banco',
@@ -184,7 +254,7 @@ void main() {
       reason: 'Solo el saldo realmente usado de la tarjeta debe ser pasivo.',
     );
 
-    // 5) Remesa mía: Efectivo baja, banco sube principal+ganancia.
+    // 7) Remesa mía: Efectivo baja, banco sube principal+ganancia.
     final businessBank = await AppDatabase.instance.accountId('1015');
     final beforeCash = await _businessAssetBalance('1010');
     final beforeBank = await _businessAssetBalance('1015');
@@ -200,7 +270,7 @@ void main() {
     expect(afterCash - beforeCash, closeTo(-100, .01));
     expect(afterBank - beforeBank, closeTo(105, .01));
 
-    // 6) Recorrido visual por las pantallas principales.
+    // 8) Recorrido visual por las pantallas principales.
     await tester.pumpWidget(const FinanceApp());
     await tester.pumpAndSettle(const Duration(seconds: 2));
     expect(find.text('Mi Empresa'), findsOneWidget);
@@ -220,7 +290,7 @@ void main() {
     expect(find.text('Deudas'), findsWidgets);
     expect(find.text('Remesas'), findsWidgets);
 
-    // 7) El formulario de Intereses pide tasa y tipo.
+    // 9) El formulario de Intereses pide tasa y tipo.
     await tester.tap(find.text('Deudas').last);
     await tester.pumpAndSettle();
     final fab = find.byType(FloatingActionButton);
@@ -244,7 +314,7 @@ void main() {
     await tester.tap(find.text('Cancelar'));
     await tester.pumpAndSettle();
 
-    // 8) Remesas muestran los dos tipos y banco destino.
+    // 10) Remesas muestran los dos tipos y banco destino.
     await tester.tap(find.text('Remesas').last);
     await tester.pumpAndSettle();
     await tester.tap(find.byType(FloatingActionButton));
@@ -257,7 +327,7 @@ void main() {
     await tester.tap(find.text('Cancelar'));
     await tester.pumpAndSettle();
 
-    // 9) Configuración contiene las reglas nuevas.
+    // 11) Configuración contiene las reglas nuevas.
     await tester.tap(find.text('Más'));
     await tester.pumpAndSettle();
     expect(find.text('Regla de remesas'), findsOneWidget);
