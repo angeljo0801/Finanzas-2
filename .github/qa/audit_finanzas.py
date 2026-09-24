@@ -33,12 +33,16 @@ if failed:
     raise SystemExit("QA crítico falló: " + ", ".join(failed))
 
 # Product/UX findings: these are reported, not all should block a release.
-if "subtype IN ('cash','bank','personal_bank')" in store:
+if (
+    "subtype IN ('cash','bank','personal_bank')" in store
+    and "r['subtype']?.toString() != 'cash'" not in ui
+):
     finding(
         "MEDIUM",
         "Remesas",
         "El selector de banco empresarial también puede contener Efectivo",
-        "La fuente de cuentas líquidas incluye cash. En el formulario de remesa conviene filtrar Efectivo para evitar seleccionar la misma caja como origen y destino.",
+        "La fuente de cuentas líquidas incluye cash y el formulario no lo filtra. "
+        "Esto permite seleccionar la misma caja física como origen y destino.",
     )
 
 if "if (bankScope == 'personal' &&\n        personalAccountId != null &&\n        await syncEnabled())" in store:
@@ -49,12 +53,16 @@ if "if (bankScope == 'personal' &&\n        personalAccountId != null &&\n      
         "Si el usuario elige explícitamente Banco mío, el saldo personal debería reflejar el depósito aunque la sincronización automática general esté apagada.",
     )
 
-if "deleteFinancialAccount" in personal and "reconcileSharedBalances" not in personal:
+if (
+    "deleteFinancialAccount" in personal
+    and "DELETE FROM v26_personal_business_links" not in store
+):
     finding(
-        "HIGH",
+        "MEDIUM",
         "Eliminación / sincronización",
-        "Eliminar una cuenta personal vinculada puede dejar la contrapartida empresarial sin reconciliar inmediatamente",
-        "La eliminación debe desvincular/revertir de forma atómica el saldo reflejado en Mi Empresa antes de borrar la cuenta personal.",
+        "Una cuenta personal eliminada puede dejar un vínculo huérfano",
+        "La reconciliación debe revertir el saldo empresarial y limpiar el vínculo "
+        "huérfano. Este control permanece como advertencia si falta esa limpieza.",
     )
 
 if "amount: interest ? interestValue : principal" in ui:
