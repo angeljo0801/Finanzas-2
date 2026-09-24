@@ -1,0 +1,276 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
+
+import 'package:finanzas_definitiva/database.dart';
+import 'package:finanzas_definitiva/finance_v26_store.dart';
+import 'package:finanzas_definitiva/main.dart';
+import 'package:finanzas_definitiva/personal_finance.dart';
+
+Future<double> _businessAssetBalance(String code) async {
+  final d = await AppDatabase.instance.db;
+  final account = await d.query(
+    'accounts',
+    columns: ['id'],
+    where: 'code=?',
+    whereArgs: [code],
+    limit: 1,
+  );
+  if (account.isEmpty) throw StateError('No existe la cuenta $code');
+  final id = account.first['id'] as int;
+  final rows = await d.rawQuery(
+    'SELECT COALESCE(SUM(debit-credit),0) v FROM journal_lines WHERE account_id=?',
+    [id],
+  );
+  return (rows.first['v'] as num).toDouble();
+}
+
+Future<double> _businessLiabilityBalance(int accountId) async {
+  final d = await AppDatabase.instance.db;
+  final rows = await d.rawQuery(
+    'SELECT COALESCE(SUM(credit-debit),0) v FROM journal_lines WHERE account_id=?',
+    [accountId],
+  );
+  return (rows.first['v'] as num).toDouble();
+}
+
+Future<Map<String, dynamic>> _personalById(int id) async {
+  final d = await AppDatabase.instance.db;
+  final rows = await d.query(
+    'personal_accounts',
+    where: 'id=?',
+    whereArgs: [id],
+    limit: 1,
+  );
+  if (rows.isEmpty) throw StateError('Cuenta personal no encontrada');
+  return rows.first;
+}
+
+void main() {
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('recorrido QA completo como usuario', (tester) async {
+    await FinanceV26Store.ensureSchema();
+
+    // 1) Reglas de remesas: propio + agente con fee separado del 50% del dueño.
+    await FinanceV26Store.saveRules(
+      const RemittanceRules(
+        ownThreshold: 100,
+        ownFixedFee: 5,
+        ownPercent: 5,
+        agentThreshold: 100,
+        agentFixedFee: 5,
+        agentPercentAbove: 5,
+        agentOwnerSharePercent: 50,
+      ),
+    );
+    expect(
+      await FinanceV26Store.remittanceProfit(
+        kind: 'own',
+        principal: 50,
+      ),
+      closeTo(5, 0.001),
+    );
+    expect(
+      await FinanceV26Store.remittanceProfit(
+        kind: 'own',
+        principal: 200,
+      ),
+      closeTo(10, 0.001),
+    );
+    expect(
+      await FinanceV26Store.remittanceCharge(
+        kind: 'agent',
+        principal: 200,
+        agent: 'QA Agent',
+      ),
+      closeTo(10, 0.001),
+    );
+    expect(
+      await FinanceV26Store.remittanceProfit(
+        kind: 'agent',
+        principal: 200,
+        agent: 'QA Agent',
+      ),
+      closeTo(5, 0.001),
+    );
+
+    // 2) Deudas: parcial, reversión de parcial y saldo pendiente.
+    final expense = await AppDatabase.instance.accountId('6040');
+    final debtId = await FinanceV26Store.createDebt(
+      name: 'QA Proveedor',
+      kind: 'payable',
+      amount: 1000,
+      dueDate: DateTime.now().add(const Duration(days: 30)),
+      counterpartAccountId: expense,
+    );
+    await FinanceV26Store.addDebtPayment(
+      debtId: debtId,
+      amount: 300,
+      date: DateTime.now(),
+      note: 'QA pago parcial',
+    );
+    var debtRows = (await FinanceV26Store.debts())
+        .where((r) => r['id'] == debtId)
+        .toList();
+    expect((debtRows.single['paid_amount'] as num).toDouble(), closeTo(300, .001));
+    expect(debtRows.single['paid'], 0);
+    final payments = await FinanceV26Store.debtPayments(debtId);
+    expect(payments, hasLength(1));
+    await FinanceV26Store.deleteDebtPayment(payments.single);
+    debtRows = (await FinanceV26Store.debts())
+        .where((r) => r['id'] == debtId)
+        .toList();
+    expect((debtRows.single['paid_amount'] as num).toDouble(), closeTo(0, .001));
+
+    // 3) Sincronización de varias cuentas personales al mismo banco empresarial.
+    final a = await PersonalFinanceStore.createFinancialAccount(
+      name: 'QA Ana',
+      bankName: 'QA Banco',
+      kind: 'savings',
+      initialBalance: 278.70,
+    );
+    final b = await PersonalFinanceStore.createFinancialAccount(
+      name: 'QA Rewards',
+      bankName: 'QA Banco',
+      kind: 'savings',
+      initialBalance: 49.29,
+    );
+    final c = await PersonalFinanceStore.createFinancialAccount(
+      name: 'QA Angel',
+      bankName: 'QA Banco',
+      kind: 'savings',
+      initialBalance: 96.92,
+    );
+    final businessPersonalBank = await AppDatabase.instance.accountId('1060');
+    await FinanceV26Store.linkPersonalBank(a, businessPersonalBank);
+    await FinanceV26Store.linkPersonalBank(b, businessPersonalBank);
+    await FinanceV26Store.linkPersonalBank(c, businessPersonalBank);
+    await FinanceV26Store.setSyncEnabled(true);
+    await FinanceV26Store.reconcileSharedBalances();
+    expect(
+      await _businessAssetBalance('1060'),
+      closeTo(424.91, 0.01),
+      reason: 'El dashboard del negocio debe sumar todas las cuentas personales vinculadas.',
+    );
+
+    // 4) Tarjetas: límite no es deuda; solo el saldo usado se sincroniza.
+    final cardId = await PersonalFinanceStore.createFinancialAccount(
+      name: 'QA Credit',
+      bankName: 'QA Banco',
+      kind: 'credit_card',
+      creditLimit: 2000,
+      initialBalance: 0,
+    );
+    await FinanceV26Store.linkPersonalCard(cardId);
+    await FinanceV26Store.reconcileSharedBalances();
+    final cardLinks = await FinanceV26Store.personalCards();
+    final card = cardLinks.firstWhere((r) => r['id'] == cardId);
+    final businessCardId = card['business_account_id'] as int;
+    expect(await _businessLiabilityBalance(businessCardId), closeTo(0, .001));
+
+    final personalCard = await _personalById(cardId);
+    await PersonalFinanceStore.addTransaction(
+      description: 'QA compra con tarjeta',
+      amount: 600,
+      debitCode: 'P5040',
+      creditCode: personalCard['code'].toString(),
+      reference: 'QA-CARD-SPEND',
+    );
+    await FinanceV26Store.reconcileSharedBalances();
+    expect(
+      await _businessLiabilityBalance(businessCardId),
+      closeTo(600, .01),
+      reason: 'Solo el saldo realmente usado de la tarjeta debe ser pasivo.',
+    );
+
+    // 5) Remesa mía: Efectivo baja, banco sube principal+ganancia.
+    final businessBank = await AppDatabase.instance.accountId('1015');
+    final beforeCash = await _businessAssetBalance('1010');
+    final beforeBank = await _businessAssetBalance('1015');
+    await FinanceV26Store.createRemittance(
+      client: 'QA Remesa',
+      kind: 'own',
+      principal: 100,
+      bankScope: 'business',
+      bankAccountId: businessBank,
+    );
+    final afterCash = await _businessAssetBalance('1010');
+    final afterBank = await _businessAssetBalance('1015');
+    expect(afterCash - beforeCash, closeTo(-100, .01));
+    expect(afterBank - beforeBank, closeTo(105, .01));
+
+    // 6) Recorrido visual por las pantallas principales.
+    await tester.pumpWidget(const FinanceApp());
+    await tester.pumpAndSettle(const Duration(seconds: 2));
+    expect(find.text('Mi Empresa'), findsOneWidget);
+    expect(find.text('Asistente financiero con IA'), findsOneWidget);
+    expect(find.textContaining('USD'), findsWidgets);
+
+    await tester.tap(find.text('Finanzas personales'));
+    await tester.pumpAndSettle();
+    expect(find.text('Tu dinero personal'), findsOneWidget);
+    expect(find.text('Billetera · bancos y tarjetas'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Plan'));
+    await tester.pumpAndSettle();
+    expect(find.text('Planificación'), findsOneWidget);
+    expect(find.text('Deudas'), findsWidgets);
+    expect(find.text('Remesas'), findsWidgets);
+
+    // 7) El formulario de Intereses pide tasa y tipo.
+    await tester.tap(find.text('Deudas').last);
+    await tester.pumpAndSettle();
+    final fab = find.byType(FloatingActionButton);
+    expect(fab, findsOneWidget);
+    await tester.tap(fab);
+    await tester.pumpAndSettle();
+    expect(find.text('Yo debo pagar'), findsOneWidget);
+
+    final dropdowns = find.byType(DropdownButtonFormField<int>);
+    expect(dropdowns, findsOneWidget);
+    await tester.tap(dropdowns.first);
+    await tester.pumpAndSettle();
+    final interestOption = find.text('Intereses').last;
+    expect(interestOption, findsOneWidget);
+    await tester.tap(interestOption);
+    await tester.pumpAndSettle();
+    expect(find.text('Tasa de interés anual'), findsOneWidget);
+    expect(find.text('Tipo de interés'), findsOneWidget);
+    expect(find.text('Simple'), findsOneWidget);
+    expect(find.text('Compuesto'), findsOneWidget);
+    await tester.tap(find.text('Cancelar'));
+    await tester.pumpAndSettle();
+
+    // 8) Remesas muestran los dos tipos y banco destino.
+    await tester.tap(find.text('Remesas').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Registrar remesa'), findsOneWidget);
+    expect(find.text('Remesa mía'), findsOneWidget);
+    expect(find.text('De agente'), findsOneWidget);
+    expect(find.text('Banco negocio'), findsOneWidget);
+    expect(find.text('Banco mío'), findsOneWidget);
+    await tester.tap(find.text('Cancelar'));
+    await tester.pumpAndSettle();
+
+    // 9) Configuración contiene las reglas nuevas.
+    await tester.tap(find.text('Más'));
+    await tester.pumpAndSettle();
+    expect(find.text('Regla de remesas'), findsOneWidget);
+    expect(find.text('Sincronización Personal ↔ Negocio'), findsOneWidget);
+    await tester.tap(find.text('Regla de remesas'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Porcentaje que cobra el agente por arriba del límite'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Mi porcentaje de la ganancia del agente'),
+      findsOneWidget,
+    );
+  });
+}
