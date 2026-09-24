@@ -57,6 +57,40 @@ if startup in s and "FinanceV26Store.ensureSchema" not in s:
         1,
     )
 
+
+# QA invariant: Dashboard and Reports must reconcile Personal ↔ Negocio before
+# calculating balances. The base source keeps the same compact load() method in
+# both widgets, so patch both copies instead of relying on a brittle exact string.
+load_pattern = re.compile(
+    r"Future<AppData>\s+load\(\)\s*async\s*\{\s*"
+    r"final\s+d\s*=\s*AppDatabase\.instance\s*;\s*"
+    r"return\s+AppData\(\s*"
+    r"await\s+d\.accounts\(\)\s*,\s*"
+    r"await\s+d\.transactions\(\)\s*,\s*"
+    r"await\s+d\.setting\('company'\)\s*,\s*"
+    r"await\s+d\.setting\('currency'\)\s*"
+    r"\)\s*;\s*\}",
+    re.S,
+)
+load_replacement = """Future<AppData> load() async {
+    await FinanceV26Store.ensureSchema();
+    if (await FinanceV26Store.syncEnabled()) {
+      await FinanceV26Store.reconcileSharedBalances();
+    }
+    final d = AppDatabase.instance;
+    return AppData(
+      await d.accounts(),
+      await d.transactions(),
+      await d.setting('company'),
+      await d.setting('currency'),
+    );
+  }"""
+s, load_count = load_pattern.subn(load_replacement, s)
+if load_count < 2:
+    raise SystemExit(
+        f"No se pudieron proteger Dashboard y Estados con reconciliación: {load_count}"
+    )
+
 # Settings: normalize all AI entries into a single main entry.
 s = re.sub(
     r"\s*ListTile\(leading:const Icon\(Icons\.smart_toy_outlined\),title:const Text\('Asistente financiero'\).*?\),\n",
