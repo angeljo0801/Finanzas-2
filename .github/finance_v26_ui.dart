@@ -6,6 +6,25 @@ import 'finance_v26_store.dart';
 double _n26(String v) => double.tryParse(v.trim().replaceAll(',', '.')) ?? 0;
 String _m26(num v) => v.toDouble().toStringAsFixed(2);
 
+String _compoundingLabel26(String value) {
+  switch (value) {
+    case 'daily':
+      return 'diaria';
+    case 'weekly':
+      return 'semanal';
+    case 'monthly':
+      return 'mensual';
+    case 'quarterly':
+      return 'trimestral';
+    case 'semiannual':
+      return 'semestral';
+    case 'annual':
+      return 'anual';
+    default:
+      return value;
+  }
+}
+
 Future<bool> _ask26(BuildContext context, String title, String body) async =>
     await showDialog<bool>(
       context: context,
@@ -631,7 +650,7 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
                             ),
                             Text(
                               'Tipo: ${row['interest_type'] == 'compound' ? 'Compuesto' : 'Simple'}'
-                              '${row['interest_type'] == 'compound' ? ' · Capitalización ${row['interest_compounding']}' : ''}',
+                              '${row['interest_type'] == 'compound' ? ' · Capitalización ${_compoundingLabel26(row['interest_compounding']?.toString() ?? '')}' : ''}',
                             ),
                             Text(
                               'Interés calculado: ${_m26((row['interest_amount'] as num?) ?? total)} · '
