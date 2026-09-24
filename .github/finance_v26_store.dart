@@ -525,9 +525,21 @@ class FinanceV26Store {
     final d = await AppDatabase.instance.db;
     final cash = await AppDatabase.instance.accountId('1010');
     final commission = await AppDatabase.instance.accountId('4020');
-    final targetBank = bankScope == 'business'
-        ? bankAccountId!
-        : await AppDatabase.instance.accountId('1060');
+    int targetBank;
+    if (bankScope == 'business') {
+      targetBank = bankAccountId!;
+    } else {
+      final linked = await d.query(
+        'v26_personal_business_links',
+        columns: ['business_account_id'],
+        where: 'personal_account_id=? AND enabled=1',
+        whereArgs: [personalAccountId],
+        limit: 1,
+      );
+      targetBank = linked.isNotEmpty
+          ? linked.first['business_account_id'] as int
+          : await AppDatabase.instance.accountId('1060');
+    }
 
     final remittanceId = await d.transaction((tx) async {
       final id = await tx.insert('remittances', {
