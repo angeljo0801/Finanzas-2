@@ -11,6 +11,8 @@ on:
       - ".github/finance_v26_store.dart"
       - ".github/finance_v26_ui.dart"
       - ".github/patch_personal_wallet_v262.py"
+      - ".github/qa/finance_logic_qa_test.dart"
+      - ".github/qa/audit_finanzas.py"
 
 permissions:
   contents: read
@@ -103,6 +105,9 @@ jobs:
           python3 .github/patch_finanzas_v26.py
           python3 .github/patch_personal_wallet_v262.py
 
+          mkdir -p finanzas_definitiva/test
+          cp .github/qa/finance_logic_qa_test.dart finanzas_definitiva/test/finance_logic_qa_test.dart
+
           python3 - <<'PY'
           import os, re
           from pathlib import Path
@@ -140,6 +145,12 @@ jobs:
       - name: Ejecutar pruebas
         working-directory: finanzas_definitiva
         run: flutter test
+
+      - name: Auditoría QA automática
+        shell: bash
+        run: |
+          python3 .github/qa/audit_finanzas.py
+          cat QA_REPORT.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Compilar Finanzas Definitiva v2.6.4
         working-directory: finanzas_definitiva
