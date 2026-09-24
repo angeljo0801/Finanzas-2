@@ -188,7 +188,7 @@ jobs:
         run: |
           {
             echo "applicationId=$FINANZAS_APPLICATION_ID"
-            echo "versionName=2.6.1"
+            echo "versionName=2.6.2"
             echo "buildNumber=$FINANZAS_BUILD_NUMBER"
             echo "signing=persistent"
             echo "source=angeljo0801/Negocio"
