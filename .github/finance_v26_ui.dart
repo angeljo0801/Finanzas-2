@@ -792,12 +792,26 @@ class _PersonalBusinessSyncPageState extends State<PersonalBusinessSyncPage> {
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Sincronización opcional'),
-                    subtitle: const Text('Actívala mientras uses cuentas personales para el negocio. Puedes apagarla cuando separes los bancos.'),
+                    subtitle: const Text(
+                      'Actívala mientras uses cuentas personales para el negocio. '
+                      'Después vincula las cuentas que también pertenecen al negocio.',
+                    ),
                     value: enabled,
                     onChanged: (v) async {
                       await FinanceV26Store.setSyncEnabled(v);
                       await _load();
+                      widget.onChanged();
                     },
+                  ),
+                  const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Text(
+                        'Importante: activar la sincronización no copia todo tu patrimonio personal. '
+                        'Solo se reflejan en Mi Empresa las cuentas y tarjetas que vincules. '
+                        'Si vinculas varias cuentas al mismo banco del negocio, sus saldos se suman.',
+                      ),
+                    ),
                   ),
                   FilledButton.icon(onPressed: _transfer, icon: const Icon(Icons.swap_horiz), label: const Text('Crear transferencia Personal ↔ Negocio')),
                   const SizedBox(height: 8),
