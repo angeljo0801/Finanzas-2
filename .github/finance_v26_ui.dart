@@ -772,7 +772,9 @@ class _V26RemittancesPageState extends State<V26RemittancesPage> {
   }
 
   Future<void> _add() async {
-    final businessBanks = await FinanceV26Store.businessLiquidAccounts();
+    final businessBanks = (await FinanceV26Store.businessLiquidAccounts())
+        .where((r) => r['subtype']?.toString() != 'cash')
+        .toList();
     final personalBanks = await FinanceV26Store.personalLiquidAccounts();
     if (!mounted) return;
     final client = TextEditingController();
