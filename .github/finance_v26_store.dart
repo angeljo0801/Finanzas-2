@@ -718,9 +718,7 @@ class FinanceV26Store {
       return id;
     });
 
-    if (bankScope == 'personal' &&
-        personalAccountId != null &&
-        await syncEnabled()) {
+    if (bankScope == 'personal' && personalAccountId != null) {
       final bank = await d.query(
         'personal_accounts',
         columns: ['code'],
@@ -830,6 +828,10 @@ class FinanceV26Store {
       );
     }
 
+
+    // Orphaned personal links are kept long enough to let this reconciliation
+    // reverse their business-side balance. They are removed after both bank
+    // and card passes finish.
     final cardLinks = await d.query('v26_business_cards');
     for (final link in cardLinks) {
       final personalId = link['personal_account_id'] as int;
@@ -866,6 +868,15 @@ class FinanceV26Store {
         ),
       );
     }
+
+    await d.rawDelete(
+      'DELETE FROM v26_personal_business_links '
+      'WHERE personal_account_id NOT IN (SELECT id FROM personal_accounts)',
+    );
+    await d.rawDelete(
+      'DELETE FROM v26_business_cards '
+      'WHERE personal_account_id NOT IN (SELECT id FROM personal_accounts)',
+    );
   }
 
   static Future<List<Map<String, dynamic>>> personalCards() async {
