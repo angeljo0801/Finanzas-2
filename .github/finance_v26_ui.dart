@@ -238,51 +238,264 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
     final name = TextEditingController();
     final amount = TextEditingController();
     final note = TextEditingController();
+    final annualRate = TextEditingController();
+    var startDate = DateTime.now();
     var due = DateTime.now().add(const Duration(days: 30));
     var category = cats.first['id'] as int;
+    var interestType = 'simple';
+    var compounding = 'monthly';
+
+    Map<String, dynamic>? selectedCategory() {
+      for (final row in cats) {
+        if (row['id'] == category) return row;
+      }
+      return null;
+    }
+
+    bool isInterestCategory() {
+      final row = selectedCategory();
+      return row?['code']?.toString() == '7010' ||
+          row?['subtype']?.toString() == 'interest';
+    }
+
+    double calculatedInterest() => FinanceV26Store.calculateInterestAmount(
+          principal: _n26(amount.text),
+          annualRatePercent: _n26(annualRate.text),
+          interestType: interestType,
+          startDate: startDate,
+          dueDate: due,
+          compounding: compounding,
+        );
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
-        builder: (c, setD) => AlertDialog(
-          title: Text(kind == 'payable' ? 'Yo debo pagar' : 'Yo debo cobrar'),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(controller: name, decoration: const InputDecoration(labelText: 'Persona o entidad')),
-              TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Importe total')),
-              DropdownButtonFormField<int>(
-                initialValue: category,
-                isExpanded: true,
-                decoration: InputDecoration(labelText: kind == 'payable' ? 'Categoría del gasto' : 'Categoría del ingreso'),
-                items: cats.map((r) => DropdownMenuItem(value: r['id'] as int, child: Text(r['name'].toString()))).toList(),
-                onChanged: (v) { if (v != null) category = v; },
+        builder: (c, setD) {
+          final interest = isInterestCategory();
+          final interestValue = interest ? calculatedInterest() : 0.0;
+          final principal = _n26(amount.text);
+          final days = due.difference(startDate).inDays;
+          return AlertDialog(
+            title: Text(kind == 'payable' ? 'Yo debo pagar' : 'Yo debo cobrar'),
+            content: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                TextField(
+                  controller: name,
+                  decoration:
+                      const InputDecoration(labelText: 'Persona o entidad'),
+                ),
+                TextField(
+                  controller: amount,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: interest
+                        ? 'Capital / base sobre la que se calcula el interés'
+                        : 'Importe total',
+                  ),
+                  onChanged: (_) => setD(() {}),
+                ),
+                DropdownButtonFormField<int>(
+                  initialValue: category,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: kind == 'payable'
+                        ? 'Categoría del gasto'
+                        : 'Categoría del ingreso',
+                  ),
+                  items: cats
+                      .map(
+                        (r) => DropdownMenuItem(
+                          value: r['id'] as int,
+                          child: Text(r['name'].toString()),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setD(() => category = v);
+                  },
+                ),
+                if (interest) ...[
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: annualRate,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Tasa de interés anual',
+                      suffixText: '%',
+                      helperText: 'Ejemplo: 5 significa 5% anual',
+                    ),
+                    onChanged: (_) => setD(() {}),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Tipo de interés',
+                      style: Theme.of(c).textTheme.labelLarge,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(
+                        value: 'simple',
+                        label: Text('Simple'),
+                      ),
+                      ButtonSegment(
+                        value: 'compound',
+                        label: Text('Compuesto'),
+                      ),
+                    ],
+                    selected: {interestType},
+                    onSelectionChanged: (v) =>
+                        setD(() => interestType = v.first),
+                  ),
+                  if (interestType == 'compound') ...[
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      initialValue: compounding,
+                      decoration: const InputDecoration(
+                        labelText: 'Capitalización',
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'daily',
+                          child: Text('Diaria'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'weekly',
+                          child: Text('Semanal'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'monthly',
+                          child: Text('Mensual'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'quarterly',
+                          child: Text('Trimestral'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'semiannual',
+                          child: Text('Semestral'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'annual',
+                          child: Text('Anual'),
+                        ),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) setD(() => compounding = v);
+                      },
+                    ),
+                  ],
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Fecha de inicio del interés'),
+                    subtitle: Text(
+                      DateFormat('dd/MM/yyyy').format(startDate),
+                    ),
+                    onTap: () async {
+                      final p = await showDatePicker(
+                        context: c,
+                        initialDate: startDate,
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime(2100),
+                      );
+                      if (p != null) setD(() => startDate = p);
+                    },
+                  ),
+                ],
+                TextField(
+                  controller: note,
+                  decoration:
+                      const InputDecoration(labelText: 'Nota opcional'),
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Vencimiento'),
+                  subtitle: Text(DateFormat('dd/MM/yyyy').format(due)),
+                  onTap: () async {
+                    final p = await showDatePicker(
+                      context: c,
+                      initialDate: due,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime(2100),
+                    );
+                    if (p != null) setD(() => due = p);
+                  },
+                ),
+                if (interest)
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Duración: ${days < 0 ? 0 : days} días'),
+                          Text(
+                            'Interés calculado: ${_m26(interestValue)}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            'Capital + interés: '
+                            '${_m26(principal + interestValue)}',
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'La deuda que se registra en la categoría '
+                            'Intereses es el interés calculado. El capital '
+                            'se conserva como base informativa para no '
+                            'contabilizarlo dos veces.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.blueGrey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ]),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('Cancelar'),
               ),
-              TextField(controller: note, decoration: const InputDecoration(labelText: 'Nota opcional')),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Vencimiento'),
-                subtitle: Text(DateFormat('dd/MM/yyyy').format(due)),
-                onTap: () async {
-                  final p = await showDatePicker(context: c, initialDate: due, firstDate: DateTime(2000), lastDate: DateTime(2100));
-                  if (p != null) setD(() => due = p);
-                },
+              FilledButton(
+                onPressed: () => Navigator.pop(c, true),
+                child: const Text('Guardar'),
               ),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Guardar')),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
+
     if (ok == true) {
+      final interest = isInterestCategory();
+      final principal = _n26(amount.text);
+      final interestValue = interest ? calculatedInterest() : 0.0;
       await FinanceV26Store.createDebt(
         name: name.text,
         kind: kind,
-        amount: _n26(amount.text),
+        amount: interest ? interestValue : principal,
         dueDate: due,
         counterpartAccountId: category,
         note: note.text,
+        interestEnabled: interest,
+        interestPrincipal: interest ? principal : 0,
+        interestRateAnnual: interest ? _n26(annualRate.text) : 0,
+        interestType: interest ? interestType : '',
+        interestCompounding:
+            interest && interestType == 'compound' ? compounding : '',
+        interestStartDate: interest ? startDate : null,
+        interestAmount: interestValue,
+        interestTotalAccumulated:
+            interest ? principal + interestValue : 0,
       );
       await _load();
       widget.onChanged();
@@ -411,7 +624,25 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
                               ],
                             ),
                           ]),
-                          Text('Original ${total.toStringAsFixed(2)} · Pagado ${paid.toStringAsFixed(2)}'),
+                          if ((row['interest_enabled'] as num?)?.toInt() == 1) ...[
+                            Text(
+                              'Capital/base: ${_m26((row['interest_principal'] as num?) ?? 0)} · '
+                              'Tasa anual: ${_m26((row['interest_rate_annual'] as num?) ?? 0)}%',
+                            ),
+                            Text(
+                              'Tipo: ${row['interest_type'] == 'compound' ? 'Compuesto' : 'Simple'}'
+                              '${row['interest_type'] == 'compound' ? ' · Capitalización ${row['interest_compounding']}' : ''}',
+                            ),
+                            Text(
+                              'Interés calculado: ${_m26((row['interest_amount'] as num?) ?? total)} · '
+                              'Capital + interés: ${_m26((row['interest_total_accumulated'] as num?) ?? 0)}',
+                            ),
+                          ],
+                          Text(
+                            (row['interest_enabled'] as num?)?.toInt() == 1
+                                ? 'Interés original ${total.toStringAsFixed(2)} · Pagado ${paid.toStringAsFixed(2)}'
+                                : 'Original ${total.toStringAsFixed(2)} · Pagado ${paid.toStringAsFixed(2)}',
+                          ),
                           Text('Pendiente ${pending.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
                           LinearProgressIndicator(value: total <= 0 ? 0 : (paid / total).clamp(0, 1)),
