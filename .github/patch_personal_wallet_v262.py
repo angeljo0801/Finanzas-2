@@ -374,7 +374,7 @@ if card_edit in p:
 personal.write_text(p, encoding="utf-8")
 
 ps = pub.read_text(encoding="utf-8")
-ps = re.sub(r"^version:.*$", "version: 2.6.3+29", ps, flags=re.M)
+ps = re.sub(r"^version:.*$", "version: 2.6.4+30", ps, flags=re.M)
 pub.write_text(ps, encoding="utf-8")
 
-print("Personal wallet edit/delete fix v2.6.3 applied")
+print("Personal wallet edit/delete fix v2.6.4 applied")
