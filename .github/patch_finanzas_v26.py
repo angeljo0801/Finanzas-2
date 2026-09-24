@@ -14,7 +14,7 @@ if "import 'finance_v26_ui.dart';" not in s:
     marker = "import 'manager_pages.dart';"
     if marker not in s:
         raise SystemExit("No se encontro manager_pages.dart en main.dart")
-    s = s.replace(marker, marker + "\nimport 'finance_v26_ui.dart';", 1)
+    s = s.replace(marker, marker + "\nimport 'finance_v26_ui.dart';\nimport 'finance_v26_store.dart';", 1)
 
 # One single dashboard entry for AI: Chat + assistant + finance library live here.
 patterns = [
@@ -45,6 +45,17 @@ for pattern, replacement in patterns:
     s, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
     if n:
         break
+
+
+# Initialize the v2.6 schema at startup so linked cards, sync, debt payments and
+# remittance rules are ready before any screen tries to delete or sync data.
+startup = "Future.microtask(() async {"
+if startup in s and "FinanceV26Store.ensureSchema" not in s:
+    s = s.replace(
+        startup,
+        startup + "\n      await FinanceV26Store.ensureSchema();",
+        1,
+    )
 
 # Settings: normalize all AI entries into a single main entry.
 s = re.sub(
@@ -194,8 +205,6 @@ if store_end in p and "deletePersonalTransaction" not in p:
         await tx.delete('personal_journal_lines', where:'transaction_id=?', whereArgs:[row['transaction_id']]);
         await tx.delete('personal_transactions', where:'id=?', whereArgs:[row['transaction_id']]);
       }
-      await tx.delete('v26_business_cards', where:'personal_account_id=?', whereArgs:[id]);
-      await tx.delete('v26_personal_business_links', where:'personal_account_id=?', whereArgs:[id]);
       await tx.delete('personal_accounts', where:'id=?', whereArgs:[id]);
     });
     await PersonalReminderBridge.cancel(id);
