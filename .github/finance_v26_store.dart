@@ -11,6 +11,7 @@ class RemittanceRules {
     required this.ownPercent,
     required this.agentThreshold,
     required this.agentFixedFee,
+    required this.agentPercentAbove,
     required this.agentOwnerSharePercent,
   });
   final double ownThreshold;
@@ -18,6 +19,7 @@ class RemittanceRules {
   final double ownPercent;
   final double agentThreshold;
   final double agentFixedFee;
+  final double agentPercentAbove;
   final double agentOwnerSharePercent;
 }
 
@@ -28,6 +30,7 @@ class FinanceV26Store {
   static const ownPercentKey = 'v26_remit_own_percent';
   static const agentThresholdKey = 'v26_remit_agent_threshold';
   static const agentFixedKey = 'v26_remit_agent_fixed';
+  static const agentPercentKey = 'v26_remit_agent_percent_above';
   static const agentShareKey = 'v26_remit_agent_owner_share';
 
   static Future<void> ensureSchema() async {
@@ -65,6 +68,12 @@ class FinanceV26Store {
         updated_at TEXT NOT NULL
       )
     ''');
+    await _ensureColumn(
+      d,
+      'v26_agent_remittance_rules',
+      'percent_above',
+      'REAL DEFAULT 5',
+    );
     await d.execute('''
       CREATE TABLE IF NOT EXISTS v26_business_cards(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,7 +104,18 @@ class FinanceV26Store {
     await _default(ownPercentKey, '5');
     await _default(agentThresholdKey, '100');
     await _default(agentFixedKey, '5');
-    await _default(agentShareKey, '5');
+    await _default(agentPercentKey, '5');
+    await _default(agentShareKey, '50');
+    final shareMigration =
+        await AppDatabase.instance.setting('v261_agent_share_migrated');
+    if (shareMigration != '1') {
+      final oldShare = await AppDatabase.instance.setting(agentShareKey);
+      if (oldShare.trim() == '5' || oldShare.trim().isEmpty) {
+        await AppDatabase.instance.setSetting(agentShareKey, '50');
+      }
+      await AppDatabase.instance
+          .setSetting('v261_agent_share_migrated', '1');
+    }
     await _default(syncKey, '0');
   }
 
@@ -170,7 +190,8 @@ class FinanceV26Store {
       ownPercent: await _doubleSetting(ownPercentKey, 5),
       agentThreshold: await _doubleSetting(agentThresholdKey, 100),
       agentFixedFee: await _doubleSetting(agentFixedKey, 5),
-      agentOwnerSharePercent: await _doubleSetting(agentShareKey, 5),
+      agentPercentAbove: await _doubleSetting(agentPercentKey, 5),
+      agentOwnerSharePercent: await _doubleSetting(agentShareKey, 50),
     );
   }
 
@@ -181,6 +202,7 @@ class FinanceV26Store {
       r.ownPercent,
       r.agentThreshold,
       r.agentFixedFee,
+      r.agentPercentAbove,
       r.agentOwnerSharePercent,
     ]) {
       if (v < 0) throw const FormatException('Los valores no pueden ser negativos.');
@@ -190,6 +212,7 @@ class FinanceV26Store {
     await AppDatabase.instance.setSetting(ownPercentKey, '${r.ownPercent}');
     await AppDatabase.instance.setSetting(agentThresholdKey, '${r.agentThreshold}');
     await AppDatabase.instance.setSetting(agentFixedKey, '${r.agentFixedFee}');
+    await AppDatabase.instance.setSetting(agentPercentKey, '${r.agentPercentAbove}');
     await AppDatabase.instance.setSetting(agentShareKey, '${r.agentOwnerSharePercent}');
   }
 
@@ -205,18 +228,31 @@ class FinanceV26Store {
     required String agent,
     required double threshold,
     required double fixedFee,
+    required double percentAbove,
   }) async {
     await ensureSchema();
     if (agent.trim().isEmpty) throw const FormatException('Escribe el agente.');
+    if (threshold < 0 || fixedFee < 0 || percentAbove < 0) {
+      throw const FormatException('Los valores no pueden ser negativos.');
+    }
     final d = await AppDatabase.instance.db;
     await d.rawInsert('''
-      INSERT INTO v26_agent_remittance_rules(agent,threshold,fixed_fee,updated_at)
-      VALUES(?,?,?,?)
+      INSERT INTO v26_agent_remittance_rules(
+        agent,threshold,fixed_fee,percent_above,updated_at
+      )
+      VALUES(?,?,?,?,?)
       ON CONFLICT(agent) DO UPDATE SET
         threshold=excluded.threshold,
         fixed_fee=excluded.fixed_fee,
+        percent_above=excluded.percent_above,
         updated_at=excluded.updated_at
-    ''', [agent.trim(), threshold, fixedFee, DateTime.now().toIso8601String()]);
+    ''', [
+      agent.trim(),
+      threshold,
+      fixedFee,
+      percentAbove,
+      DateTime.now().toIso8601String(),
+    ]);
   }
 
   static Future<void> deleteAgentRule(int id) async {
@@ -228,7 +264,7 @@ class FinanceV26Store {
     );
   }
 
-  static Future<double> remittanceProfit({
+  static Future<double> remittanceCharge({
     required String kind,
     required double principal,
     String agent = '',
@@ -254,8 +290,30 @@ class FinanceV26Store {
     final fixed = rows.isEmpty
         ? r.agentFixedFee
         : (rows.first['fixed_fee'] as num).toDouble();
-    final base = principal < threshold ? fixed : principal;
-    return base * r.agentOwnerSharePercent / 100;
+    final percentAbove = rows.isEmpty
+        ? r.agentPercentAbove
+        : ((rows.first['percent_above'] as num?) ?? r.agentPercentAbove)
+            .toDouble();
+    return principal < threshold
+        ? fixed
+        : principal * percentAbove / 100;
+  }
+
+  static Future<double> remittanceProfit({
+    required String kind,
+    required double principal,
+    String agent = '',
+    double? customPercent,
+  }) async {
+    final charge = await remittanceCharge(
+      kind: kind,
+      principal: principal,
+      agent: agent,
+      customPercent: customPercent,
+    );
+    if (kind == 'own') return charge;
+    final r = await loadRules();
+    return charge * r.agentOwnerSharePercent / 100;
   }
 
   static Future<List<Map<String, dynamic>>> businessLiquidAccounts() async {
@@ -515,12 +573,20 @@ class FinanceV26Store {
     if (bankScope == 'personal' && personalAccountId == null) {
       throw const FormatException('Selecciona el banco personal.');
     }
-    final profit = await remittanceProfit(
+    final charge = await remittanceCharge(
       kind: kind,
       principal: principal,
       agent: agent,
       customPercent: customPercent,
     );
+    final profit = kind == 'own'
+        ? charge
+        : await remittanceProfit(
+            kind: kind,
+            principal: principal,
+            agent: agent,
+            customPercent: customPercent,
+          );
     final expected = principal + profit;
     final d = await AppDatabase.instance.db;
     final cash = await AppDatabase.instance.accountId('1010');
@@ -552,7 +618,7 @@ class FinanceV26Store {
         'settled_at': DateTime.now().toIso8601String(),
         'kind': kind,
         'agent': agent.trim(),
-        'fee': profit,
+        'fee': charge,
         'owner_profit': profit,
         'bank_scope': bankScope,
         'bank_account_id': bankScope == 'business' ? bankAccountId : null,
