@@ -702,26 +702,42 @@ class FinanceV26Store {
       'v26_personal_business_links',
       where: 'enabled=1',
     );
+
+    // Varias cuentas personales pueden representar un mismo "Banco personal
+    // usado por el negocio". Reconciliamos por cuenta empresarial agregada para
+    // que el saldo sea la SUMA de todas las cuentas vinculadas y no el valor de
+    // la última cuenta procesada.
+    final targetsByBusiness = <int, double>{};
     for (final link in bankLinks) {
       final personalId = link['personal_account_id'] as int;
       final businessId = link['business_account_id'] as int;
       final p = await d.rawQuery(
-        'SELECT COALESCE(SUM(debit-credit),0) v FROM personal_journal_lines WHERE account_id=?',
+        'SELECT COALESCE(SUM(debit-credit),0) v '
+        'FROM personal_journal_lines WHERE account_id=?',
         [personalId],
       );
+      final personalBalance = (p.first['v'] as num).toDouble();
+      targetsByBusiness[businessId] =
+          (targetsByBusiness[businessId] ?? 0) + personalBalance;
+    }
+
+    for (final entry in targetsByBusiness.entries) {
+      final businessId = entry.key;
+      final target = entry.value;
       final b = await d.rawQuery(
-        'SELECT COALESCE(SUM(debit-credit),0) v FROM journal_lines WHERE account_id=?',
+        'SELECT COALESCE(SUM(debit-credit),0) v '
+        'FROM journal_lines WHERE account_id=?',
         [businessId],
       );
-      final target = (p.first['v'] as num).toDouble();
       final current = (b.first['v'] as num).toDouble();
       final diff = target - current;
       if (diff.abs() <= .005) continue;
-      final ref = 'V26SYNC:BANK:$personalId:${DateTime.now().microsecondsSinceEpoch}';
+      final ref =
+          'V26SYNC:BANK:$businessId:${DateTime.now().microsecondsSinceEpoch}';
       await AppDatabase.instance.addTransaction(
         JournalTransaction(
           date: DateTime.now(),
-          description: 'Sincronización de banco personal compartido',
+          description: 'Sincronización de bancos personales compartidos',
           reference: ref,
           cashFlowClass: 'noncash',
           lines: diff > 0
