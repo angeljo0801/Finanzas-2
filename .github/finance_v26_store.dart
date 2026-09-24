@@ -40,6 +40,14 @@ class FinanceV26Store {
     await _ensureColumn(d, 'debts', 'counterpart_account_id', 'INTEGER');
     await _ensureColumn(d, 'debts', 'linked', 'INTEGER DEFAULT 0');
     await _ensureColumn(d, 'debts', 'note', "TEXT DEFAULT ''");
+    await _ensureColumn(d, 'debts', 'interest_enabled', 'INTEGER DEFAULT 0');
+    await _ensureColumn(d, 'debts', 'interest_principal', 'REAL DEFAULT 0');
+    await _ensureColumn(d, 'debts', 'interest_rate_annual', 'REAL DEFAULT 0');
+    await _ensureColumn(d, 'debts', 'interest_type', "TEXT DEFAULT ''");
+    await _ensureColumn(d, 'debts', 'interest_compounding', "TEXT DEFAULT ''");
+    await _ensureColumn(d, 'debts', 'interest_start_date', 'TEXT');
+    await _ensureColumn(d, 'debts', 'interest_amount', 'REAL DEFAULT 0');
+    await _ensureColumn(d, 'debts', 'interest_total_accumulated', 'REAL DEFAULT 0');
     await _ensureColumn(d, 'remittances', 'kind', "TEXT DEFAULT 'own'");
     await _ensureColumn(d, 'remittances', 'agent', "TEXT DEFAULT ''");
     await _ensureColumn(d, 'remittances', 'fee', 'REAL DEFAULT 0');
@@ -373,6 +381,45 @@ class FinanceV26Store {
     return id;
   }
 
+  static int compoundingPeriodsPerYear(String value) {
+    switch (value) {
+      case 'daily':
+        return 365;
+      case 'weekly':
+        return 52;
+      case 'monthly':
+        return 12;
+      case 'quarterly':
+        return 4;
+      case 'semiannual':
+        return 2;
+      case 'annual':
+      default:
+        return 1;
+    }
+  }
+
+  static double calculateInterestAmount({
+    required double principal,
+    required double annualRatePercent,
+    required String interestType,
+    required DateTime startDate,
+    required DateTime dueDate,
+    String compounding = 'monthly',
+  }) {
+    if (principal <= 0 || annualRatePercent < 0) return 0;
+    final days = math.max(0, dueDate.difference(startDate).inDays);
+    final years = days / 365.0;
+    final rate = annualRatePercent / 100.0;
+    if (interestType == 'compound') {
+      final n = compoundingPeriodsPerYear(compounding);
+      final accumulated =
+          principal * math.pow(1 + rate / n, n * years).toDouble();
+      return math.max(0.0, accumulated - principal);
+    }
+    return math.max(0.0, principal * rate * years);
+  }
+
   static Future<List<Map<String, dynamic>>> debts() async {
     await ensureSchema();
     return (await AppDatabase.instance.db).query(
@@ -388,10 +435,32 @@ class FinanceV26Store {
     required DateTime dueDate,
     required int counterpartAccountId,
     String note = '',
+    bool interestEnabled = false,
+    double interestPrincipal = 0,
+    double interestRateAnnual = 0,
+    String interestType = '',
+    String interestCompounding = '',
+    DateTime? interestStartDate,
+    double interestAmount = 0,
+    double interestTotalAccumulated = 0,
   }) async {
     await ensureSchema();
     if (name.trim().isEmpty || amount <= 0) {
       throw const FormatException('Revisa el nombre y el importe.');
+    }
+    if (interestEnabled) {
+      if (interestPrincipal <= 0) {
+        throw const FormatException('El capital/base del interés debe ser mayor que cero.');
+      }
+      if (interestRateAnnual <= 0) {
+        throw const FormatException('La tasa anual debe ser mayor que cero.');
+      }
+      if (interestStartDate == null || !dueDate.isAfter(interestStartDate)) {
+        throw const FormatException('El vencimiento debe ser posterior a la fecha de inicio.');
+      }
+      if (interestType != 'simple' && interestType != 'compound') {
+        throw const FormatException('Selecciona interés simple o compuesto.');
+      }
     }
     final d = await AppDatabase.instance.db;
     final payable = await AppDatabase.instance.accountId('2010');
@@ -407,6 +476,14 @@ class FinanceV26Store {
         'counterpart_account_id': counterpartAccountId,
         'linked': 1,
         'note': note.trim(),
+        'interest_enabled': interestEnabled ? 1 : 0,
+        'interest_principal': interestPrincipal,
+        'interest_rate_annual': interestRateAnnual,
+        'interest_type': interestType,
+        'interest_compounding': interestCompounding,
+        'interest_start_date': interestStartDate?.toIso8601String(),
+        'interest_amount': interestAmount,
+        'interest_total_accumulated': interestTotalAccumulated,
       });
       await _insertTx(
         tx,
