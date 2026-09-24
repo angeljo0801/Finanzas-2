@@ -32,6 +32,7 @@ class _RemittanceRulesPageState extends State<RemittanceRulesPage> {
   final ownPercent = TextEditingController();
   final agentThreshold = TextEditingController();
   final agentFixed = TextEditingController();
+  final agentPercent = TextEditingController();
   final agentShare = TextEditingController();
   bool loading = true;
   List<Map<String, dynamic>> agents = const [];
@@ -50,6 +51,7 @@ class _RemittanceRulesPageState extends State<RemittanceRulesPage> {
     ownPercent.text = _m26(r.ownPercent);
     agentThreshold.text = _m26(r.agentThreshold);
     agentFixed.text = _m26(r.agentFixedFee);
+    agentPercent.text = _m26(r.agentPercentAbove);
     agentShare.text = _m26(r.agentOwnerSharePercent);
     if (mounted) setState(() { agents = a; loading = false; });
   }
@@ -76,6 +78,7 @@ class _RemittanceRulesPageState extends State<RemittanceRulesPage> {
         ownPercent: _n26(ownPercent.text),
         agentThreshold: _n26(agentThreshold.text),
         agentFixedFee: _n26(agentFixed.text),
+        agentPercentAbove: _n26(agentPercent.text),
         agentOwnerSharePercent: _n26(agentShare.text),
       ),
     );
@@ -94,6 +97,11 @@ class _RemittanceRulesPageState extends State<RemittanceRulesPage> {
     final fixed = TextEditingController(
       text: row == null ? agentFixed.text : _m26(row['fixed_fee'] as num),
     );
+    final percent = TextEditingController(
+      text: row == null
+          ? agentPercent.text
+          : _m26((row['percent_above'] as num?) ?? _n26(agentPercent.text)),
+    );
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -102,6 +110,14 @@ class _RemittanceRulesPageState extends State<RemittanceRulesPage> {
           TextField(controller: name, decoration: const InputDecoration(labelText: 'Agente')),
           TextField(controller: threshold, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Límite')),
           TextField(controller: fixed, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Tarifa fija debajo del límite')),
+          TextField(
+            controller: percent,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Porcentaje que cobra por arriba del límite',
+              suffixText: '%',
+            ),
+          ),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
@@ -114,6 +130,7 @@ class _RemittanceRulesPageState extends State<RemittanceRulesPage> {
         agent: name.text,
         threshold: _n26(threshold.text),
         fixedFee: _n26(fixed.text),
+        percentAbove: _n26(percent.text),
       );
       await _load();
     }
@@ -135,11 +152,32 @@ class _RemittanceRulesPageState extends State<RemittanceRulesPage> {
                   _field(ownPercent, 'Porcentaje', suffix: '%'),
                   const Divider(height: 32),
                   Text('Remesas de agentes', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                  const Text('Cada agente puede tener su límite y tarifa fija. Tu porcentaje de ganancia es común para todos.'),
+                  const Text(
+                    'El agente cobra una tarifa fija debajo del límite y un porcentaje por arriba. '
+                    'Tu ganancia es un porcentaje de lo que cobre el agente.',
+                  ),
                   const SizedBox(height: 12),
                   _field(agentThreshold, 'Límite predeterminado'),
                   _field(agentFixed, 'Tarifa fija predeterminada'),
-                  _field(agentShare, 'Mi porcentaje de ganancia', suffix: '%'),
+                  _field(
+                    agentPercent,
+                    'Porcentaje que cobra el agente por arriba del límite',
+                    suffix: '%',
+                  ),
+                  _field(
+                    agentShare,
+                    'Mi porcentaje de la ganancia del agente',
+                    suffix: '%',
+                  ),
+                  const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Text(
+                        'Ejemplo: remesa de 200, agente cobra 5% = 10. '
+                        'Si tu parte es 50%, tu ganancia es 5.',
+                      ),
+                    ),
+                  ),
                   FilledButton.icon(onPressed: _save, icon: const Icon(Icons.save_outlined), label: const Text('Guardar reglas')),
                   const SizedBox(height: 20),
                   Row(children: [
@@ -149,7 +187,11 @@ class _RemittanceRulesPageState extends State<RemittanceRulesPage> {
                   for (final row in agents)
                     ListTile(
                       title: Text(row['agent'].toString()),
-                      subtitle: Text('Límite ${_m26(row['threshold'] as num)} · Fija ${_m26(row['fixed_fee'] as num)}'),
+                      subtitle: Text(
+                        'Límite ${_m26(row['threshold'] as num)} · '
+                        'Fija ${_m26(row['fixed_fee'] as num)} · '
+                        'Arriba ${_m26((row['percent_above'] as num?) ?? _n26(agentPercent.text))}%',
+                      ),
                       onTap: () => _agent(row),
                       trailing: IconButton(
                         icon: const Icon(Icons.delete_outline),
