@@ -1,4 +1,5 @@
 name: Export Finanzas v2.5.5 source for diagnostics
+# Refreshed for v2.6 diagnostics
 
 on:
   workflow_dispatch:
