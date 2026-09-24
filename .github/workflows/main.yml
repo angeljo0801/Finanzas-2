@@ -1,4 +1,4 @@
-name: Compilar Finanzas Definitiva Oficial
+name: Compilar Finanzas Definitiva v2.6.0 Oficial
 
 on:
   workflow_dispatch:
@@ -7,6 +7,9 @@ on:
       - main
     paths:
       - ".github/workflows/main.yml"
+      - ".github/patch_finanzas_v26.py"
+      - ".github/finance_v26_store.dart"
+      - ".github/finance_v26_ui.dart"
 
 permissions:
   contents: read
@@ -56,7 +59,7 @@ jobs:
           key_b64="$(extract_secret ANDROID_KEYSTORE_BASE64 "$ANDROID_KEYSTORE_BASE64" | tr -cd 'A-Za-z0-9+/=')"
           printf '%s' "$key_b64" | base64 --decode >/dev/null 2>&1
 
-      - name: Descargar Finanzas Definitiva v2.5.5 actual
+      - name: Descargar Finanzas Definitiva base actual
         shell: bash
         run: |
           git clone --depth 1 https://github.com/angeljo0801/Negocio.git negocio-current
@@ -74,6 +77,8 @@ jobs:
           cp negocio-current/.github/finance_tool_router.dart finanzas_definitiva/lib/finance_tool_router.dart
           cp negocio-current/.github/personal_finance.dart finanzas_definitiva/lib/personal_finance.dart
           cp negocio-current/.github/paqueteria_sync.dart finanzas_definitiva/lib/paqueteria_sync.dart
+          cp .github/finance_v26_store.dart finanzas_definitiva/lib/finance_v26_store.dart
+          cp .github/finance_v26_ui.dart finanzas_definitiva/lib/finance_v26_ui.dart
 
       - name: Instalar Flutter
         uses: subosito/flutter-action@v2
@@ -94,6 +99,7 @@ jobs:
 
           python3 negocio-current/.github/patch_finanzas.py
           python3 .github/patch_finanzas_compat_v4.py
+          python3 .github/patch_finanzas_v26.py
 
           python3 - <<'PY'
           import os, re
@@ -133,7 +139,7 @@ jobs:
         working-directory: finanzas_definitiva
         run: flutter test
 
-      - name: Compilar Finanzas Definitiva v2.5.5
+      - name: Compilar Finanzas Definitiva v2.6.0
         working-directory: finanzas_definitiva
         shell: bash
         run: |
@@ -169,10 +175,10 @@ jobs:
             --ks-key-alias "$KEY_ALIAS" \
             --ks-pass "pass:$STORE_PASSWORD" \
             --key-pass "pass:$KEY_PASSWORD" \
-            --out build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.5.5.apk \
+            --out build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.0.apk \
             build/app/outputs/flutter-apk/app-release.apk
 
-          "$APKSIGNER" verify --verbose --print-certs build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.5.5.apk
+          "$APKSIGNER" verify --verbose --print-certs build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.0.apk
           rm -f android/finanzas-release.jks
 
       - name: Guardar identidad final
@@ -180,7 +186,7 @@ jobs:
         run: |
           {
             echo "applicationId=$FINANZAS_APPLICATION_ID"
-            echo "versionName=2.5.5"
+            echo "versionName=2.6.0"
             echo "buildNumber=$FINANZAS_BUILD_NUMBER"
             echo "signing=persistent"
             echo "source=angeljo0801/Negocio"
@@ -190,8 +196,8 @@ jobs:
       - name: Subir Finanzas Definitiva oficial
         uses: actions/upload-artifact@v4
         with:
-          name: Finanzas-Definitiva-v2.5.5-Official
+          name: Finanzas-Definitiva-v2.6.0-Official
           path: |
-            finanzas_definitiva/build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.5.5.apk
+            finanzas_definitiva/build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.0.apk
             finanzas_definitiva/build/app/outputs/flutter-apk/BUILD_IDENTITY.txt
           retention-days: 90
