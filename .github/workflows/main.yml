@@ -1,4 +1,4 @@
-name: Compilar Finanzas Definitiva v2.6.3 Oficial
+name: Compilar Finanzas Definitiva v2.6.4 Oficial
 
 on:
   workflow_dispatch:
@@ -141,7 +141,7 @@ jobs:
         working-directory: finanzas_definitiva
         run: flutter test
 
-      - name: Compilar Finanzas Definitiva v2.6.3
+      - name: Compilar Finanzas Definitiva v2.6.4
         working-directory: finanzas_definitiva
         shell: bash
         run: |
@@ -177,10 +177,10 @@ jobs:
             --ks-key-alias "$KEY_ALIAS" \
             --ks-pass "pass:$STORE_PASSWORD" \
             --key-pass "pass:$KEY_PASSWORD" \
-            --out build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.3.apk \
+            --out build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.4.apk \
             build/app/outputs/flutter-apk/app-release.apk
 
-          "$APKSIGNER" verify --verbose --print-certs build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.3.apk
+          "$APKSIGNER" verify --verbose --print-certs build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.4.apk
           rm -f android/finanzas-release.jks
 
       - name: Guardar identidad final
@@ -198,8 +198,8 @@ jobs:
       - name: Subir Finanzas Definitiva oficial
         uses: actions/upload-artifact@v4
         with:
-          name: Finanzas-Definitiva-v2.6.3-Official
+          name: Finanzas-Definitiva-v2.6.4-Official
           path: |
-            finanzas_definitiva/build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.3.apk
+            finanzas_definitiva/build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.4.apk
             finanzas_definitiva/build/app/outputs/flutter-apk/BUILD_IDENTITY.txt
           retention-days: 90
