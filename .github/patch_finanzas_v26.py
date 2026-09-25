@@ -116,12 +116,14 @@ s = s.replace(
 settings_marker = "      ListTile(leading:const Icon(Icons.receipt_long_outlined),title:const Text('Libro diario profesional')"
 if settings_marker in s and "title:const Text('Regla de remesas')" not in s:
     extra = """      ListTile(
+        key:const Key('settings_remittance_rules'),
         leading:const Icon(Icons.currency_exchange),
         title:const Text('Regla de remesas'),
         subtitle:const Text('Mis remesas y remesas de agentes'),
         onTap:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>const RemittanceRulesPage())),
       ),
       ListTile(
+        key:const Key('settings_personal_business_sync'),
         leading:const Icon(Icons.sync_alt),
         title:const Text('Sincronización Personal ↔ Negocio'),
         subtitle:const Text('Vincula cuentas y crea transferencias opcionales sin duplicar saldos'),
