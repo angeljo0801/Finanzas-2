@@ -548,6 +548,140 @@ class _PersonalTrashPageState extends State<PersonalTrashPage> {
 """
     p = p.replace(trash_page_marker, trash_page + trash_page_marker, 1)
 
+
+# Let the user classify a personal movement at creation time too.
+p = p.replace(
+    """  final amountController = TextEditingController();
+  final descriptionController = TextEditingController();
+
+  List<Map<String, dynamic>> accountRows = const [];
+""",
+    """  final amountController = TextEditingController();
+  final descriptionController = TextEditingController();
+  final businessShareController = TextEditingController(text: '50');
+
+  List<Map<String, dynamic>> accountRows = const [];
+  String businessMode = 'inherit';
+""",
+    1,
+)
+
+p = p.replace(
+    """    amountController.dispose();
+    descriptionController.dispose();
+    super.dispose();
+""",
+    """    amountController.dispose();
+    descriptionController.dispose();
+    businessShareController.dispose();
+    super.dispose();
+""",
+    1,
+)
+
+p = p.replace(
+    """      await PersonalFinanceStore.addTransaction(
+        description: descriptionController.text.trim().isEmpty
+            ? _defaultDescription()
+            : descriptionController.text.trim(),
+        amount: amount,
+        debitCode: debitCode,
+        creditCode: creditCode,
+        reference:
+            'MAN-P-${DateTime.now().millisecondsSinceEpoch}',
+        date: date,
+      );
+""",
+    """      double businessShare = -1;
+      if (businessMode == 'personal') {
+        businessShare = 0;
+      } else if (businessMode == 'business') {
+        businessShare = 100;
+      } else if (businessMode == 'split') {
+        businessShare = double.tryParse(
+              businessShareController.text.trim().replaceAll(',', '.'),
+            ) ??
+            0;
+        businessShare = businessShare.clamp(0, 100).toDouble();
+      }
+      await PersonalFinanceStore.addTransaction(
+        description: descriptionController.text.trim().isEmpty
+            ? _defaultDescription()
+            : descriptionController.text.trim(),
+        amount: amount,
+        debitCode: debitCode,
+        creditCode: creditCode,
+        reference:
+            'MAN-P-${DateTime.now().millisecondsSinceEpoch}',
+        date: date,
+        businessSharePercent: businessShare,
+      );
+""",
+    1,
+)
+
+movement_description = """          TextField(
+            controller: descriptionController,
+            decoration: InputDecoration(
+              labelText: 'Descripción',
+              hintText: _defaultDescription(),
+              border: const OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+"""
+if movement_description in p:
+    p = p.replace(
+        movement_description,
+        movement_description + """          DropdownButtonFormField<String>(
+            initialValue: businessMode,
+            decoration: const InputDecoration(
+              labelText: 'Uso para Personal ↔ Negocio',
+              border: OutlineInputBorder(),
+              helperText: 'Puedes cambiarlo después desde Sincronización.',
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: 'inherit',
+                child: Text('Automático · usar % de la cuenta'),
+              ),
+              DropdownMenuItem(
+                value: 'personal',
+                child: Text('100% Personal'),
+              ),
+              DropdownMenuItem(
+                value: 'business',
+                child: Text('100% Negocio'),
+              ),
+              DropdownMenuItem(
+                value: 'split',
+                child: Text('Dividir por porcentaje'),
+              ),
+            ],
+            onChanged: saving
+                ? null
+                : (v) {
+                    if (v != null) setState(() => businessMode = v);
+                  },
+          ),
+          if (businessMode == 'split') ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: businessShareController,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Porcentaje del negocio',
+                suffixText: '%',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+""",
+        1,
+    )
+
 personal.write_text(p, encoding="utf-8")
 
 ps = pub.read_text(encoding="utf-8")
