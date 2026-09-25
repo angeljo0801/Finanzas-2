@@ -73,6 +73,12 @@ class FinanceV26Store {
         reference TEXT NOT NULL
       )
     ''');
+    await _ensureColumn(
+      d,
+      'v26_debt_payments',
+      'money_account_id',
+      'INTEGER',
+    );
     await d.execute('''
       CREATE TABLE IF NOT EXISTS v26_agent_remittance_rules(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -597,12 +603,14 @@ class FinanceV26Store {
 
   static Future<List<Map<String, dynamic>>> debtPayments(int debtId) async {
     await ensureSchema();
-    return (await AppDatabase.instance.db).query(
-      'v26_debt_payments',
-      where: 'debt_id=?',
-      whereArgs: [debtId],
-      orderBy: 'date DESC,id DESC',
-    );
+    final d = await AppDatabase.instance.db;
+    return d.rawQuery('''
+      SELECT p.*,a.name AS money_account_name
+      FROM v26_debt_payments p
+      LEFT JOIN accounts a ON a.id=p.money_account_id
+      WHERE p.debt_id=?
+      ORDER BY p.date DESC,p.id DESC
+    ''', [debtId]);
   }
 
   static Future<void> addDebtPayment({
@@ -668,6 +676,7 @@ class FinanceV26Store {
         'date': date.toIso8601String(),
         'note': note.trim(),
         'reference': ref,
+        'money_account_id': moneyAccountId,
       });
       final newPaid = math.min(total, paid + amount);
       await tx.update(
