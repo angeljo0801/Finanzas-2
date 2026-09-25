@@ -13,6 +13,7 @@ on:
       - ".github/patch_personal_wallet_v262.py"
       - ".github/qa/finance_logic_qa_test.dart"
       - ".github/qa/audit_finanzas.py"
+      - ".github/qa/finance_user_journey_test.dart"
 
 permissions:
   contents: read
@@ -31,7 +32,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
 
     steps:
       - name: Descargar repositorio oficial
@@ -105,14 +106,26 @@ jobs:
           python3 .github/patch_finanzas_v26.py
           python3 .github/patch_personal_wallet_v262.py
 
-          mkdir -p finanzas_definitiva/test
+          mkdir -p finanzas_definitiva/test finanzas_definitiva/integration_test
           cp .github/qa/finance_logic_qa_test.dart finanzas_definitiva/test/finance_logic_qa_test.dart
+          cp .github/qa/finance_user_journey_test.dart finanzas_definitiva/integration_test/finance_user_journey_test.dart
 
           python3 - <<'PY'
           import os, re
           from pathlib import Path
 
           expected = os.environ["FINANZAS_APPLICATION_ID"]
+
+          pubspec = Path("finanzas_definitiva/pubspec.yaml")
+          pub = pubspec.read_text()
+          if "integration_test:" not in pub:
+              pub = pub.replace(
+                  "dev_dependencies:\n",
+                  "dev_dependencies:\n  integration_test:\n    sdk: flutter\n",
+                  1,
+              )
+          pubspec.write_text(pub)
+
           p = Path("finanzas_definitiva/android/app/build.gradle.kts")
           s = p.read_text()
           s, n1 = re.subn(r'namespace\s*=\s*"[^"]+"', f'namespace = "{expected}"', s, count=1)
@@ -136,7 +149,7 @@ jobs:
 
       - name: Analizar código
         working-directory: finanzas_definitiva
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings lib
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings lib test integration_test
 
       - name: Generar logo monetario
         working-directory: finanzas_definitiva
@@ -151,6 +164,23 @@ jobs:
         run: |
           python3 .github/qa/audit_finanzas.py
           cat QA_REPORT.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Habilitar KVM para QA Android
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: QA Android como usuario antes del APK oficial
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: cd finanzas_definitiva && flutter test integration_test/finance_user_journey_test.dart -d emulator-5554 --reporter expanded
 
       - name: Compilar Finanzas Definitiva v2.6.4
         working-directory: finanzas_definitiva
@@ -213,4 +243,6 @@ jobs:
           path: |
             finanzas_definitiva/build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.4.apk
             finanzas_definitiva/build/app/outputs/flutter-apk/BUILD_IDENTITY.txt
+            QA_REPORT.md
+            QA_REPORT.json
           retention-days: 90
