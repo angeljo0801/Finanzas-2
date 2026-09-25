@@ -143,6 +143,13 @@ void main() {
       ),
       closeTo(5, 0.001),
     );
+    await FinanceV26Store.saveAgentRule(
+      agent: 'QA Agent',
+      threshold: 100,
+      fixedFee: 5,
+      percentAbove: 5,
+    );
+    expect(await FinanceV26Store.agentNames(), contains('QA Agent'));
 
     // 2) Deudas: parcial, reversión de parcial y saldo pendiente.
     final expense = await AppDatabase.instance.accountId('6040');
@@ -153,10 +160,12 @@ void main() {
       dueDate: DateTime.now().add(const Duration(days: 30)),
       counterpartAccountId: expense,
     );
+    final cashAccount = await AppDatabase.instance.accountId('1010');
     await FinanceV26Store.addDebtPayment(
       debtId: debtId,
       amount: 300,
       date: DateTime.now(),
+      moneyAccountId: cashAccount,
       note: 'QA pago parcial',
     );
     var debtRows = (await FinanceV26Store.debts())
@@ -237,7 +246,70 @@ void main() {
       reason: 'Sincronizar otras cuentas no debe borrar una remesa personal explícita.',
     );
 
-    // 5) Eliminar una cuenta vinculada revierte y limpia el vínculo huérfano.
+    // 5) Cuenta mixta: porcentaje por cuenta + clasificación por movimiento.
+    final mixed = await PersonalFinanceStore.createFinancialAccount(
+      name: 'QA Mixta',
+      bankName: 'QA Banco mixto',
+      kind: 'checking',
+      initialBalance: 100,
+    );
+    final mixedBusiness = await FinanceV26Store.ensureBusinessAccount(
+      'QAMIX',
+      'QA Banco mixto negocio',
+      'asset',
+      'bank',
+    );
+    await FinanceV26Store.linkPersonalBank(
+      mixed,
+      mixedBusiness,
+      businessSharePercent: 50,
+    );
+    await FinanceV26Store.reconcileSharedBalances();
+    expect(await _businessAssetBalance('QAMIX'), closeTo(50, .01));
+
+    final mixedRow = await _personalById(mixed);
+    await PersonalFinanceStore.addTransaction(
+      description: 'QA gasto personal mixto',
+      amount: 20,
+      debitCode: 'P5040',
+      creditCode: mixedRow['code'].toString(),
+      reference: 'QA-MIX-PERSONAL',
+      businessSharePercent: 0,
+    );
+    await FinanceV26Store.reconcileSharedBalances();
+    expect(
+      await _businessAssetBalance('QAMIX'),
+      closeTo(50, .01),
+      reason: 'Un movimiento 100% personal no cambia el saldo del negocio.',
+    );
+
+    await PersonalFinanceStore.addTransaction(
+      description: 'QA gasto negocio mixto',
+      amount: 30,
+      debitCode: 'P5040',
+      creditCode: mixedRow['code'].toString(),
+      reference: 'QA-MIX-BUSINESS',
+      businessSharePercent: 100,
+    );
+    await FinanceV26Store.reconcileSharedBalances();
+    expect(await _businessAssetBalance('QAMIX'), closeTo(20, .01));
+
+    final mixedMovements =
+        await FinanceV26Store.personalMovementsForClassification();
+    final businessMovement = mixedMovements.firstWhere(
+      (r) => r['reference'] == 'QA-MIX-BUSINESS',
+    );
+    await FinanceV26Store.setPersonalMovementBusinessShare(
+      businessMovement['id'] as int,
+      50,
+    );
+    expect(
+      await _businessAssetBalance('QAMIX'),
+      closeTo(35, .01),
+      reason: 'Dividir el movimiento al 50% debe reflejar solo su parte empresarial.',
+    );
+
+    // 6) Eliminar una cuenta vinculada revierte y limpia el vínculo huérfano.
     final disposable = await PersonalFinanceStore.createFinancialAccount(
       name: 'QA Eliminar',
       bankName: 'QA Temporal',
@@ -263,7 +335,7 @@ void main() {
       reason: 'No deben quedar vínculos huérfanos después de reconciliar.',
     );
 
-    // 6) Tarjetas: límite no es deuda; solo el saldo usado se sincroniza.
+    // 7) Tarjetas: límite no es deuda; solo el saldo usado se sincroniza.
     final cardId = await PersonalFinanceStore.createFinancialAccount(
       name: 'QA Credit',
       bankName: 'QA Banco',
@@ -271,7 +343,10 @@ void main() {
       creditLimit: 2000,
       initialBalance: 0,
     );
-    await FinanceV26Store.linkPersonalCard(cardId);
+    await FinanceV26Store.linkPersonalCard(
+      cardId,
+      businessSharePercent: 50,
+    );
     await FinanceV26Store.reconcileSharedBalances();
     final cardLinks = await FinanceV26Store.personalCards();
     final card = cardLinks.firstWhere((r) => r['id'] == cardId);
@@ -289,8 +364,14 @@ void main() {
     await FinanceV26Store.reconcileSharedBalances();
     expect(
       await _businessLiabilityBalance(businessCardId),
-      closeTo(600, .01),
-      reason: 'Solo el saldo realmente usado de la tarjeta debe ser pasivo.',
+      closeTo(300, .01),
+      reason: 'Una tarjeta mixta al 50% solo debe reflejar la parte empresarial.',
+    );
+    await FinanceV26Store.updatePersonalCardShare(cardId, 25);
+    expect(
+      await _businessLiabilityBalance(businessCardId),
+      closeTo(150, .01),
+      reason: 'Cambiar el porcentaje predeterminado debe reconciliar la deuda.',
     );
     await FinanceV26Store.unlinkPersonalCard(cardId);
     expect(
@@ -299,7 +380,7 @@ void main() {
       reason: 'Desvincular la tarjeta debe retirar únicamente el pasivo derivado de sync.',
     );
 
-    // 7) Desvincular el último banco también revierte el saldo derivado.
+    // 8) Desvincular el último banco también revierte el saldo derivado.
     final unlinkBankPersonal =
         await PersonalFinanceStore.createFinancialAccount(
       name: 'QA Desvincular banco',
@@ -326,7 +407,56 @@ void main() {
       reason: 'Desvincular el último banco no puede dejar un activo fantasma.',
     );
 
-    // 8) Remesa mía: Efectivo baja, banco sube principal+ganancia.
+    // 9) Papelera personal: eliminar y restaurar conserva cuenta y saldo.
+    final trashAccount = await PersonalFinanceStore.createFinancialAccount(
+      name: 'QA Papelera',
+      bankName: 'QA Trash',
+      kind: 'savings',
+      initialBalance: 88,
+    );
+    await PersonalFinanceStore.deleteFinancialAccount(trashAccount);
+    final trashRows = await PersonalFinanceStore.personalTrash();
+    final trashItem = trashRows.firstWhere(
+      (r) => r['title'] == 'QA Papelera',
+    );
+    await PersonalFinanceStore.restorePersonalTrash(trashItem['id'] as int);
+    expect(await _personalAssetBalance(trashAccount), closeTo(88, .01));
+
+    // 10) Préstamos: principal es pasivo, interés es gasto separado.
+    final loanBank = await AppDatabase.instance.accountId('1015');
+    final loanLiability = await AppDatabase.instance.accountId('2500');
+    final beforeLoanLiability =
+        await _businessLiabilityBalance(loanLiability);
+    final loanId = await FinanceV26Store.createLoan(
+      lender: 'QA Bank Loan',
+      principal: 1000,
+      annualRate: 12,
+      interestType: 'simple',
+      compounding: 'monthly',
+      startDate: DateTime(2026, 1, 1),
+      dueDate: DateTime(2027, 1, 1),
+      receiveAccountId: loanBank,
+    );
+    expect(
+      await _businessLiabilityBalance(loanLiability) - beforeLoanLiability,
+      closeTo(1000, .01),
+    );
+    await FinanceV26Store.addLoanPayment(
+      loanId: loanId,
+      principalAmount: 200,
+      interestAmount: 20,
+      paymentAccountId: loanBank,
+      date: DateTime(2026, 2, 1),
+      note: 'QA pago préstamo',
+    );
+    final loan = (await FinanceV26Store.loans())
+        .firstWhere((r) => r['id'] == loanId);
+    expect(
+      (loan['outstanding_principal'] as num).toDouble(),
+      closeTo(800, .01),
+    );
+
+    // 11) Remesa mía: Efectivo baja, banco sube principal+ganancia.
     final businessBank = await AppDatabase.instance.accountId('1015');
     final beforeCash = await _businessAssetBalance('1010');
     final beforeBank = await _businessAssetBalance('1015');
@@ -342,7 +472,7 @@ void main() {
     expect(afterCash - beforeCash, closeTo(-100, .01));
     expect(afterBank - beforeBank, closeTo(105, .01));
 
-    // 9) Recorrido visual por las pantallas principales.
+    // 12) Recorrido visual por las pantallas principales.
     await tester.pumpWidget(const FinanceApp());
     await tester.pumpAndSettle(const Duration(seconds: 2));
     expect(find.text('Mi Empresa'), findsOneWidget);
@@ -353,6 +483,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Tu dinero personal'), findsOneWidget);
     expect(find.text('Billetera · bancos y tarjetas'), findsOneWidget);
+    expect(find.text('Papelera personal'), findsOneWidget);
     await tester.pageBack();
     await tester.pumpAndSettle();
 
@@ -362,7 +493,7 @@ void main() {
     expect(find.text('Deudas'), findsWidgets);
     expect(find.text('Remesas'), findsWidgets);
 
-    // 10) El formulario de Intereses pide tasa y tipo.
+    // 13) El formulario de Intereses pide tasa y tipo.
     await tester.tap(find.text('Deudas').last);
     await tester.pumpAndSettle();
     expect(
@@ -399,7 +530,9 @@ void main() {
     await tester.tap(find.text('Cancelar'));
     await tester.pumpAndSettle();
 
-    // 11) Remesas muestran los dos tipos y banco destino.
+    expect(find.text('Préstamos'), findsOneWidget);
+
+    // 14) Remesas muestran los dos tipos y banco destino.
     await tester.tap(find.text('Remesas').last);
     await tester.pumpAndSettle();
     expect(
@@ -419,7 +552,7 @@ void main() {
     await tester.tap(find.text('Cancelar'));
     await tester.pumpAndSettle();
 
-    // 12) Configuración contiene las reglas nuevas.
+    // 15) Configuración contiene las reglas nuevas.
     await tester.tap(find.text('Más'));
     await tester.pumpAndSettle();
 
