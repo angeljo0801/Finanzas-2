@@ -246,6 +246,7 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
   int tab = 0;
   List<Map<String, dynamic>> debts = const [];
   List<Map<String, dynamic>> cards = const [];
+  List<Map<String, dynamic>> loans = const [];
 
   @override
   void initState() {
@@ -256,7 +257,14 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
   Future<void> _load() async {
     final d = await FinanceV26Store.debts();
     final c = await FinanceV26Store.personalCards();
-    if (mounted) setState(() { debts = d; cards = c; });
+    final l = await FinanceV26Store.loans();
+    if (mounted) {
+      setState(() {
+        debts = d;
+        cards = c;
+        loans = l;
+      });
+    }
   }
 
   Future<void> _addDebt(String kind) async {
@@ -534,12 +542,15 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
   }
 
   Future<void> _payment(Map<String, dynamic> row) async {
+    final moneyAccounts = await FinanceV26Store.businessLiquidAccounts();
+    if (!mounted || moneyAccounts.isEmpty) return;
     final total = (row['amount'] as num).toDouble();
     final paid = ((row['paid_amount'] as num?) ?? 0).toDouble();
     final pending = (total - paid).clamp(0, total).toDouble();
     final amount = TextEditingController();
     final note = TextEditingController();
     var date = DateTime.now();
+    var moneyAccountId = moneyAccounts.first['id'] as int;
     final payable = row['kind'] == 'payable';
     final ok = await showDialog<bool>(
       context: context,
@@ -548,8 +559,33 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
           title: Text(payable ? 'Añadir pago parcial' : 'Añadir cobro parcial'),
           content: Column(mainAxisSize: MainAxisSize.min, children: [
             Text('Saldo pendiente: ${pending.toStringAsFixed(2)}'),
-            TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Importe')),
-            TextField(controller: note, decoration: const InputDecoration(labelText: 'Nota opcional')),
+            TextField(
+              controller: amount,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Importe'),
+            ),
+            DropdownButtonFormField<int>(
+              initialValue: moneyAccountId,
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: payable ? 'Pagar desde' : 'Cobrar en',
+              ),
+              items: moneyAccounts
+                  .map(
+                    (a) => DropdownMenuItem(
+                      value: a['id'] as int,
+                      child: Text(a['name'].toString()),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) setD(() => moneyAccountId = v);
+              },
+            ),
+            TextField(
+              controller: note,
+              decoration: const InputDecoration(labelText: 'Nota opcional'),
+            ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Fecha'),
@@ -572,12 +608,465 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
         debtId: row['id'] as int,
         amount: _n26(amount.text),
         date: date,
+        moneyAccountId: moneyAccountId,
         note: note.text,
       );
       await _load();
       widget.onChanged();
     }
   }
+
+  Future<double?> _businessShareDialog({
+    required String title,
+    required double current,
+  }) async {
+    final controller = TextEditingController(
+      text: current.toStringAsFixed(0),
+    );
+    final result = await showDialog<double>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Porcentaje usado por el negocio',
+            suffixText: '%',
+            helperText: '0 = personal · 100 = negocio · intermedio = compartido',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = _n26(controller.text).clamp(0, 100).toDouble();
+              Navigator.pop(c, value);
+            },
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
+  }
+
+  Future<void> _addLoan() async {
+    final accounts = await FinanceV26Store.businessLiquidAccounts();
+    if (!mounted || accounts.isEmpty) return;
+    final lender = TextEditingController();
+    final principal = TextEditingController();
+    final rate = TextEditingController();
+    final note = TextEditingController();
+    var interestType = 'simple';
+    var compounding = 'monthly';
+    var start = DateTime.now();
+    var due = DateTime.now().add(const Duration(days: 365));
+    var receiveAccountId = accounts.first['id'] as int;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setD) => AlertDialog(
+          title: const Text('Nuevo préstamo'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(
+                controller: lender,
+                decoration: const InputDecoration(
+                  labelText: 'Banco, persona o prestamista',
+                ),
+              ),
+              TextField(
+                controller: principal,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Principal recibido',
+                ),
+              ),
+              DropdownButtonFormField<int>(
+                initialValue: receiveAccountId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Dónde recibí el dinero',
+                ),
+                items: accounts
+                    .map(
+                      (a) => DropdownMenuItem(
+                        value: a['id'] as int,
+                        child: Text(a['name'].toString()),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) setD(() => receiveAccountId = v);
+                },
+              ),
+              TextField(
+                controller: rate,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Tasa anual',
+                  suffixText: '%',
+                ),
+              ),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'simple', label: Text('Simple')),
+                  ButtonSegment(value: 'compound', label: Text('Compuesto')),
+                ],
+                selected: {interestType},
+                onSelectionChanged: (v) =>
+                    setD(() => interestType = v.first),
+              ),
+              if (interestType == 'compound')
+                DropdownButtonFormField<String>(
+                  initialValue: compounding,
+                  decoration:
+                      const InputDecoration(labelText: 'Capitalización'),
+                  items: const [
+                    DropdownMenuItem(value: 'daily', child: Text('Diaria')),
+                    DropdownMenuItem(value: 'weekly', child: Text('Semanal')),
+                    DropdownMenuItem(value: 'monthly', child: Text('Mensual')),
+                    DropdownMenuItem(
+                      value: 'quarterly',
+                      child: Text('Trimestral'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'semiannual',
+                      child: Text('Semestral'),
+                    ),
+                    DropdownMenuItem(value: 'annual', child: Text('Anual')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) setD(() => compounding = v);
+                  },
+                ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Fecha de inicio'),
+                subtitle: Text(DateFormat('dd/MM/yyyy').format(start)),
+                onTap: () async {
+                  final p = await showDatePicker(
+                    context: c,
+                    initialDate: start,
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime(2100),
+                  );
+                  if (p != null) setD(() => start = p);
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Vencimiento'),
+                subtitle: Text(DateFormat('dd/MM/yyyy').format(due)),
+                onTap: () async {
+                  final p = await showDatePicker(
+                    context: c,
+                    initialDate: due,
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime(2100),
+                  );
+                  if (p != null) setD(() => due = p);
+                },
+              ),
+              TextField(
+                controller: note,
+                decoration: const InputDecoration(labelText: 'Nota opcional'),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'El principal recibido aumenta tu banco/caja y crea el pasivo '
+                'Préstamo bancario. Los intereses se registran aparte cuando los pagas.',
+                style: TextStyle(fontSize: 12, color: Colors.blueGrey),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Registrar préstamo'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok == true) {
+      await FinanceV26Store.createLoan(
+        lender: lender.text,
+        principal: _n26(principal.text),
+        annualRate: _n26(rate.text),
+        interestType: interestType,
+        compounding: compounding,
+        startDate: start,
+        dueDate: due,
+        receiveAccountId: receiveAccountId,
+        note: note.text,
+      );
+      await _load();
+      widget.onChanged();
+    }
+  }
+
+  Future<void> _loanPayment(Map<String, dynamic> loan) async {
+    final accounts = await FinanceV26Store.businessLiquidAccounts();
+    if (!mounted || accounts.isEmpty) return;
+    final principal = TextEditingController();
+    final interest = TextEditingController();
+    final note = TextEditingController();
+    var date = DateTime.now();
+    var accountId = accounts.first['id'] as int;
+    final pending =
+        ((loan['outstanding_principal'] as num?) ?? 0).toDouble();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setD) => AlertDialog(
+          title: Text('Pago préstamo · ${loan['lender']}'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('Principal pendiente: ${_m26(pending)}'),
+              TextField(
+                controller: principal,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Principal que estoy pagando',
+                ),
+              ),
+              TextField(
+                controller: interest,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Interés incluido en este pago',
+                ),
+              ),
+              DropdownButtonFormField<int>(
+                initialValue: accountId,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Pagar desde'),
+                items: accounts
+                    .map(
+                      (a) => DropdownMenuItem(
+                        value: a['id'] as int,
+                        child: Text(a['name'].toString()),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) setD(() => accountId = v);
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Fecha'),
+                subtitle: Text(DateFormat('dd/MM/yyyy').format(date)),
+                onTap: () async {
+                  final p = await showDatePicker(
+                    context: c,
+                    initialDate: date,
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime(2100),
+                  );
+                  if (p != null) setD(() => date = p);
+                },
+              ),
+              TextField(
+                controller: note,
+                decoration: const InputDecoration(labelText: 'Nota opcional'),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Registrar pago'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok == true) {
+      await FinanceV26Store.addLoanPayment(
+        loanId: loan['id'] as int,
+        principalAmount: _n26(principal.text),
+        interestAmount: _n26(interest.text),
+        paymentAccountId: accountId,
+        date: date,
+        note: note.text,
+      );
+      await _load();
+      widget.onChanged();
+    }
+  }
+
+  Future<void> _loanHistory(Map<String, dynamic> loan) async {
+    final payments =
+        await FinanceV26Store.loanPayments(loan['id'] as int);
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.all(12),
+          children: [
+            Text(
+              'Historial préstamo · ${loan['lender']}',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            if (payments.isEmpty)
+              const ListTile(title: Text('Todavía no hay pagos.')),
+            for (final p in payments)
+              ListTile(
+                leading: const Icon(Icons.payments_outlined),
+                title: Text(
+                  'Principal ${_m26(p['principal_amount'] as num)} · '
+                  'Interés ${_m26(p['interest_amount'] as num)}',
+                ),
+                subtitle: Text(
+                  '${p['payment_account_name']} · '
+                  '${DateFormat('dd/MM/yyyy').format(DateTime.parse(p['date'].toString()))}',
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () async {
+                    if (await _ask26(
+                      c,
+                      'Eliminar pago de préstamo',
+                      'Se revertirá principal, interés y salida de dinero.',
+                    )) {
+                      await FinanceV26Store.deleteLoanPayment(p);
+                      if (c.mounted) Navigator.pop(c);
+                      await _load();
+                      widget.onChanged();
+                    }
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _loanList() => Scaffold(
+        floatingActionButton: FloatingActionButton(
+          onPressed: _addLoan,
+          child: const Icon(Icons.add),
+        ),
+        body: loans.isEmpty
+            ? const Center(
+                child: Text(
+                  'Registra préstamos recibidos sin confundir el principal con un gasto.',
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.all(12),
+                children: [
+                  const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Text(
+                        'El principal es un pasivo. Solo el interés pagado se registra como gasto.',
+                      ),
+                    ),
+                  ),
+                  for (final loan in loans)
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              const Icon(Icons.account_balance_outlined),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  loan['lender'].toString(),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              PopupMenuButton<String>(
+                                onSelected: (v) async {
+                                  if (v == 'history') {
+                                    await _loanHistory(loan);
+                                  } else if (v == 'delete' &&
+                                      await _ask26(
+                                        context,
+                                        'Eliminar préstamo',
+                                        'Se eliminarán también los pagos y asientos vinculados.',
+                                      )) {
+                                    await FinanceV26Store.deleteLoan(
+                                      loan['id'] as int,
+                                    );
+                                    await _load();
+                                    widget.onChanged();
+                                  }
+                                },
+                                itemBuilder: (_) => const [
+                                  PopupMenuItem(
+                                    value: 'history',
+                                    child: Text('Historial de pagos'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Eliminar'),
+                                  ),
+                                ],
+                              ),
+                            ]),
+                            Text(
+                              'Principal original ${_m26(loan['principal'] as num)} · '
+                              'Pendiente ${_m26(loan['outstanding_principal'] as num)}',
+                            ),
+                            Text(
+                              'Tasa ${_m26(loan['annual_rate'] as num)}% · '
+                              '${loan['interest_type'] == 'compound' ? 'Compuesto' : 'Simple'}'
+                              '${loan['interest_type'] == 'compound' ? ' · ${_compoundingLabel26(loan['compounding'].toString())}' : ''}',
+                            ),
+                            Text(
+                              'Recibido en ${loan['receive_account_name']} · '
+                              'vence ${DateFormat('dd/MM/yyyy').format(DateTime.parse(loan['due_date'].toString()))}',
+                            ),
+                            if (loan['status'] == 'active') ...[
+                              const SizedBox(height: 10),
+                              FilledButton.icon(
+                                onPressed: () => _loanPayment(loan),
+                                icon: const Icon(Icons.payments_outlined),
+                                label: const Text('Registrar pago'),
+                              ),
+                            ] else
+                              const Chip(
+                                avatar: Icon(Icons.check, size: 18),
+                                label: Text('Préstamo pagado'),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+      );
 
   Future<void> _history(Map<String, dynamic> row) async {
     final payments = await FinanceV26Store.debtPayments(row['id'] as int);
@@ -717,7 +1206,9 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
                         title: Text(card['name'].toString()),
                         subtitle: Text(
                           '${card['bank_name']?.toString().isEmpty ?? true ? '' : '${card['bank_name']} · '}'
-                          'Deuda ${_m26(card['debt_balance'] as num)} · Límite ${_m26((card['credit_limit'] as num?) ?? 0)}',
+                          'Deuda ${_m26(card['debt_balance'] as num)} · '
+                          'Límite ${_m26((card['credit_limit'] as num?) ?? 0)}'
+                          '${card['link_id'] == null ? '' : ' · Negocio ${_m26((card['business_share_percent'] as num?) ?? 100)}%'}',
                         ),
                         trailing: card['link_id'] == null
                             ? FilledButton(
@@ -730,14 +1221,41 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
                               )
                             : PopupMenuButton<String>(
                                 onSelected: (v) async {
-                                  if (v == 'unlink' &&
-                                      await _ask26(context, 'Desvincular tarjeta', 'No se borrará la tarjeta personal.')) {
-                                    await FinanceV26Store.unlinkPersonalCard(card['id'] as int);
+                                  if (v == 'share') {
+                                    final share = await _businessShareDialog(
+                                      title: 'Uso de la tarjeta por el negocio',
+                                      current: ((card['business_share_percent'] as num?) ?? 100).toDouble(),
+                                    );
+                                    if (share != null) {
+                                      await FinanceV26Store.updatePersonalCardShare(
+                                        card['id'] as int,
+                                        share,
+                                      );
+                                      await _load();
+                                      widget.onChanged();
+                                    }
+                                  } else if (v == 'unlink' &&
+                                      await _ask26(
+                                        context,
+                                        'Desvincular tarjeta',
+                                        'No se borrará la tarjeta personal.',
+                                      )) {
+                                    await FinanceV26Store.unlinkPersonalCard(
+                                      card['id'] as int,
+                                    );
                                     await _load();
+                                    widget.onChanged();
                                   }
                                 },
                                 itemBuilder: (_) => const [
-                                  PopupMenuItem(value: 'unlink', child: Text('Desvincular del negocio')),
+                                  PopupMenuItem(
+                                    value: 'share',
+                                    child: Text('Porcentaje usado por el negocio'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'unlink',
+                                    child: Text('Desvincular del negocio'),
+                                  ),
                                 ],
                               ),
                       ),
@@ -757,12 +1275,21 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
                 ButtonSegment(value: 0, label: Text('Yo debo pagar')),
                 ButtonSegment(value: 1, label: Text('Yo debo cobrar')),
                 ButtonSegment(value: 2, label: Text('Tarjetas')),
+                ButtonSegment(value: 3, label: Text('Préstamos')),
               ],
               selected: {tab},
               onSelectionChanged: (v) => setState(() => tab = v.first),
             ),
           ),
-          Expanded(child: tab == 0 ? _debtList('payable') : tab == 1 ? _debtList('receivable') : _cardList()),
+          Expanded(
+            child: tab == 0
+                ? _debtList('payable')
+                : tab == 1
+                    ? _debtList('receivable')
+                    : tab == 2
+                        ? _cardList()
+                        : _loanList(),
+          ),
         ],
       );
 }
