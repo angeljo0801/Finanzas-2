@@ -75,10 +75,16 @@ class _RemittanceRulesPageState extends State<RemittanceRulesPage> {
     if (mounted) setState(() { agents = a; loading = false; });
   }
 
-  Widget _field(TextEditingController c, String label, {String? suffix}) =>
+  Widget _field(
+    TextEditingController c,
+    String label, {
+    String? suffix,
+    Key? key,
+  }) =>
       Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: TextField(
+          key: key,
           controller: c,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: InputDecoration(
@@ -182,11 +188,13 @@ class _RemittanceRulesPageState extends State<RemittanceRulesPage> {
                     agentPercent,
                     'Porcentaje que cobra el agente por arriba del límite',
                     suffix: '%',
+                    key: const Key('agent_percent_above_field'),
                   ),
                   _field(
                     agentShare,
                     'Mi porcentaje de la ganancia del agente',
                     suffix: '%',
+                    key: const Key('agent_owner_share_field'),
                   ),
                   const Card(
                     child: Padding(
@@ -337,6 +345,7 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
                 if (interest) ...[
                   const SizedBox(height: 10),
                   TextField(
+                    key: const Key('interest_rate_field'),
                     controller: annualRate,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
@@ -357,6 +366,7 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
                   ),
                   const SizedBox(height: 6),
                   SegmentedButton<String>(
+                    key: const Key('interest_type_selector'),
                     segments: const [
                       ButtonSegment(
                         value: 'simple',
