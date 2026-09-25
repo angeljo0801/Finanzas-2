@@ -399,9 +399,25 @@ void main() {
     // 12) Configuración contiene las reglas nuevas.
     await tester.tap(find.text('Más'));
     await tester.pumpAndSettle();
-    expect(find.text('Regla de remesas'), findsOneWidget);
-    expect(find.text('Sincronización Personal ↔ Negocio'), findsOneWidget);
-    await tester.tap(find.text('Regla de remesas'));
+
+    final settingsList = find.byType(ListView);
+    expect(settingsList, findsOneWidget);
+
+    final rulesEntry = find.byKey(const Key('settings_remittance_rules'));
+    await tester.scrollUntilVisible(
+      rulesEntry,
+      250,
+      scrollable: find.descendant(
+        of: settingsList,
+        matching: find.byType(Scrollable),
+      ),
+    );
+    expect(rulesEntry, findsOneWidget);
+
+    final syncEntry = find.byKey(const Key('settings_personal_business_sync'));
+    expect(syncEntry, findsOneWidget);
+
+    await tester.tap(rulesEntry);
     await _pumpUntilVisible(tester, find.text('Mis remesas'));
     final rulesList = find.byType(ListView);
     expect(rulesList, findsOneWidget);
