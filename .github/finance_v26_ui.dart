@@ -1213,7 +1213,15 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
                         trailing: card['link_id'] == null
                             ? FilledButton(
                                 onPressed: () async {
-                                  await FinanceV26Store.linkPersonalCard(card['id'] as int);
+                                  final share = await _businessShareDialog(
+                                    title: 'Uso de la tarjeta por el negocio',
+                                    current: 100,
+                                  );
+                                  if (share == null) return;
+                                  await FinanceV26Store.linkPersonalCard(
+                                    card['id'] as int,
+                                    businessSharePercent: share,
+                                  );
                                   await _load();
                                   widget.onChanged();
                                 },
@@ -1270,15 +1278,18 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
         children: [
           Padding(
             padding: const EdgeInsets.all(10),
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(value: 0, label: Text('Yo debo pagar')),
-                ButtonSegment(value: 1, label: Text('Yo debo cobrar')),
-                ButtonSegment(value: 2, label: Text('Tarjetas')),
-                ButtonSegment(value: 3, label: Text('Préstamos')),
-              ],
-              selected: {tab},
-              onSelectionChanged: (v) => setState(() => tab = v.first),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(value: 0, label: Text('Yo debo pagar')),
+                  ButtonSegment(value: 1, label: Text('Yo debo cobrar')),
+                  ButtonSegment(value: 2, label: Text('Tarjetas')),
+                  ButtonSegment(value: 3, label: Text('Préstamos')),
+                ],
+                selected: {tab},
+                onSelectionChanged: (v) => setState(() => tab = v.first),
+              ),
             ),
           ),
           Expanded(
