@@ -27,6 +27,19 @@ critical_checks = {
     "interest_simple_compound": "calculateInterestAmount" in store and "interestType" in ui,
     "personal_business_links": "v26_personal_business_links" in store,
     "linked_credit_cards": "v26_business_cards" in store,
+    "mixed_account_movement_classification":
+        "business_share_percent" in store and
+        "setPersonalMovementBusinessShare" in store and
+        "Clasificar movimientos" in ui,
+    "loan_principal_separate_from_interest":
+        "v27_loans" in store and "createLoan" in store and
+        "Préstamos" in ui,
+    "personal_recycle_bin":
+        "personal_trash" in personal and "Papelera personal" in personal,
+    "debt_payment_account_selector":
+        "moneyAccountId" in store and "Pagar desde" in ui and "Cobrar en" in ui,
+    "remittance_agent_selector":
+        "agentNames()" in store and "Agente registrado" in ui,
 }
 failed = [name for name, ok in critical_checks.items() if not ok]
 if failed:
@@ -90,7 +103,10 @@ if (
         "como Personal, Negocio o dividirlos cuando la misma cuenta se usa para ambos.",
     )
 
-if "whereArgs: [kind == 'payable' ? 'expense' : 'revenue']" in store:
+if (
+    "whereArgs: [kind == 'payable' ? 'expense' : 'revenue']" in store
+    and "v27_loans" not in store
+):
     finding(
         "MEDIUM",
         "Deudas y préstamos",
@@ -100,7 +116,10 @@ if "whereArgs: [kind == 'payable' ? 'expense' : 'revenue']" in store:
         "y deje los intereses en su propia categoría.",
     )
 
-if "amount: interest ? interestValue : principal" in ui:
+if (
+    "amount: interest ? interestValue : principal" in ui
+    and "createLoan" not in store
+):
     finding(
         "INFO",
         "Intereses",
@@ -116,7 +135,9 @@ if "Papelera" not in personal:
         "El libro diario tiene Papelera, pero las cuentas/movimientos personales se borran directamente. Una papelera/restauración unificada reduciría errores accidentales.",
     )
 
-if "debtPayments" in store and "accountId('1010')" in store:
+debt_payment_block = store.split("static Future<void> addDebtPayment", 1)[1] if "static Future<void> addDebtPayment" in store else ""
+debt_payment_block = debt_payment_block.split("static Future<void> deleteDebtPayment", 1)[0]
+if "accountId('1010')" in debt_payment_block:
     finding(
         "MEDIUM",
         "Pagos de deudas",
@@ -124,7 +145,7 @@ if "debtPayments" in store and "accountId('1010')" in store:
         "Conviene permitir elegir Efectivo, banco del negocio o cuenta personal vinculada para que el asiento represente de dónde salió o entró el dinero realmente.",
     )
 
-if "TextField(controller: agent" in ui:
+if "TextField(controller: agent" in ui and "Agente registrado" not in ui:
     finding(
         "LOW",
         "Remesas de agentes",
