@@ -352,8 +352,8 @@ void main() {
     expect(interestOption, findsOneWidget);
     await tester.tap(interestOption);
     await tester.pumpAndSettle();
-    expect(find.text('Tasa de interés anual'), findsOneWidget);
-    expect(find.text('Tipo de interés'), findsOneWidget);
+    expect(find.byKey(const Key('interest_rate_field')), findsOneWidget);
+    expect(find.byKey(const Key('interest_type_selector')), findsOneWidget);
     expect(find.text('Simple'), findsOneWidget);
     expect(find.text('Compuesto'), findsOneWidget);
     await tester.tap(find.text('Cancelar'));
@@ -386,12 +386,16 @@ void main() {
     expect(find.text('Sincronización Personal ↔ Negocio'), findsOneWidget);
     await tester.tap(find.text('Regla de remesas'));
     await tester.pumpAndSettle();
+    final rulesList = find.byType(ListView);
+    expect(rulesList, findsOneWidget);
+    await tester.drag(rulesList, const Offset(0, -500));
+    await tester.pumpAndSettle();
     expect(
-      find.text('Porcentaje que cobra el agente por arriba del límite'),
+      find.byKey(const Key('agent_percent_above_field')),
       findsOneWidget,
     );
     expect(
-      find.text('Mi porcentaje de la ganancia del agente'),
+      find.byKey(const Key('agent_owner_share_field')),
       findsOneWidget,
     );
   });
