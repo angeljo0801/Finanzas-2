@@ -56,6 +56,12 @@ class FinanceV26Store {
     await _ensureColumn(d, 'remittances', 'bank_account_id', 'INTEGER');
     await _ensureColumn(d, 'remittances', 'personal_account_id', 'INTEGER');
     await _ensureColumn(d, 'remittances', 'custom_rate', 'REAL');
+    await _ensureColumn(
+      d,
+      'personal_transactions',
+      'business_share_percent',
+      'REAL NOT NULL DEFAULT -1',
+    );
 
     await d.execute('''
       CREATE TABLE IF NOT EXISTS v26_debt_payments(
@@ -98,7 +104,44 @@ class FinanceV26Store {
         business_account_id INTEGER NOT NULL,
         link_kind TEXT NOT NULL DEFAULT 'bank',
         enabled INTEGER NOT NULL DEFAULT 1,
+        business_share_percent REAL NOT NULL DEFAULT 100,
         created_at TEXT NOT NULL
+      )
+    ''');
+    await _ensureColumn(
+      d,
+      'v26_personal_business_links',
+      'business_share_percent',
+      'REAL NOT NULL DEFAULT 100',
+    );
+
+    await d.execute('''
+      CREATE TABLE IF NOT EXISTS v27_loans(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lender TEXT NOT NULL,
+        principal REAL NOT NULL,
+        outstanding_principal REAL NOT NULL,
+        annual_rate REAL NOT NULL DEFAULT 0,
+        interest_type TEXT NOT NULL DEFAULT 'simple',
+        compounding TEXT NOT NULL DEFAULT 'monthly',
+        start_date TEXT NOT NULL,
+        due_date TEXT NOT NULL,
+        receive_account_id INTEGER NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await d.execute('''
+      CREATE TABLE IF NOT EXISTS v27_loan_payments(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        loan_id INTEGER NOT NULL,
+        principal_amount REAL NOT NULL DEFAULT 0,
+        interest_amount REAL NOT NULL DEFAULT 0,
+        payment_account_id INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        reference TEXT NOT NULL
       )
     ''');
 
@@ -270,6 +313,23 @@ class FinanceV26Store {
       where: 'id=?',
       whereArgs: [id],
     );
+  }
+
+  static Future<List<String>> agentNames() async {
+    await ensureSchema();
+    final d = await AppDatabase.instance.db;
+    final rows = await d.rawQuery('''
+      SELECT agent FROM v26_agent_remittance_rules
+      UNION
+      SELECT agent FROM remittances
+      WHERE TRIM(COALESCE(agent,'')) <> ''
+      ORDER BY agent COLLATE NOCASE
+    ''');
+    return rows
+        .map((r) => r['agent']?.toString().trim() ?? '')
+        .where((v) => v.isNotEmpty)
+        .toSet()
+        .toList();
   }
 
   static Future<double> remittanceCharge({
@@ -549,6 +609,7 @@ class FinanceV26Store {
     required int debtId,
     required double amount,
     required DateTime date,
+    required int moneyAccountId,
     String note = '',
   }) async {
     await ensureSchema();
@@ -563,7 +624,21 @@ class FinanceV26Store {
     if (amount > pending + .005) {
       throw FormatException('El pago supera el saldo pendiente (${pending.toStringAsFixed(2)}).');
     }
-    final cash = await AppDatabase.instance.accountId('1010');
+    final moneyRows = await d.query(
+      'accounts',
+      columns: ['id','type','subtype'],
+      where: 'id=?',
+      whereArgs: [moneyAccountId],
+      limit: 1,
+    );
+    if (moneyRows.isEmpty ||
+        moneyRows.first['type']?.toString() != 'asset' ||
+        !const {'cash','bank','personal_bank'}
+            .contains(moneyRows.first['subtype']?.toString())) {
+      throw const FormatException(
+        'Selecciona Efectivo o una cuenta bancaria válida.',
+      );
+    }
     final payable = await AppDatabase.instance.accountId('2010');
     final receivable = await AppDatabase.instance.accountId('1020');
     final ref = 'V26DEBT:$debtId:PAY:${DateTime.now().microsecondsSinceEpoch}';
@@ -580,10 +655,10 @@ class FinanceV26Store {
         lines: kind == 'payable'
             ? [
                 JournalLine(accountId: payable, debit: amount),
-                JournalLine(accountId: cash, credit: amount),
+                JournalLine(accountId: moneyAccountId, credit: amount),
               ]
             : [
-                JournalLine(accountId: cash, debit: amount),
+                JournalLine(accountId: moneyAccountId, debit: amount),
                 JournalLine(accountId: receivable, credit: amount),
               ],
       );
@@ -762,6 +837,7 @@ class FinanceV26Store {
           debitCode: bank.first['code'].toString(),
           creditCode: 'P2030',
           reference: 'V26REM-P:$remittanceId',
+          businessSharePercent: 100,
         );
       }
     }
@@ -815,14 +891,24 @@ class FinanceV26Store {
     for (final link in bankLinks) {
       final personalId = link['personal_account_id'] as int;
       final businessId = link['business_account_id'] as int;
-      final p = await d.rawQuery(
-        'SELECT COALESCE(SUM(debit-credit),0) v '
-        'FROM personal_journal_lines WHERE account_id=?',
-        [personalId],
-      );
-      final personalBalance = (p.first['v'] as num).toDouble();
+      final share =
+          ((link['business_share_percent'] as num?) ?? 100).toDouble();
+      final p = await d.rawQuery('''
+        SELECT COALESCE(SUM(
+          (l.debit-l.credit) *
+          (CASE
+            WHEN COALESCE(t.business_share_percent,-1) >= 0
+              THEN t.business_share_percent
+            ELSE ?
+          END) / 100.0
+        ),0) v
+        FROM personal_journal_lines l
+        JOIN personal_transactions t ON t.id=l.transaction_id
+        WHERE l.account_id=?
+      ''', [share, personalId]);
+      final businessClassifiedBalance = (p.first['v'] as num).toDouble();
       targetsByBusiness[businessId] =
-          (targetsByBusiness[businessId] ?? 0) + personalBalance;
+          (targetsByBusiness[businessId] ?? 0) + businessClassifiedBalance;
     }
 
     for (final entry in targetsByBusiness.entries) {
@@ -866,15 +952,24 @@ class FinanceV26Store {
       final personalId = link['personal_account_id'] as int;
       final businessId = link['business_account_id'] as int;
       final share = ((link['business_share_percent'] as num?) ?? 100).toDouble();
-      final p = await d.rawQuery(
-        'SELECT COALESCE(SUM(credit-debit),0) v FROM personal_journal_lines WHERE account_id=?',
-        [personalId],
-      );
+      final p = await d.rawQuery('''
+        SELECT COALESCE(SUM(
+          (l.credit-l.debit) *
+          (CASE
+            WHEN COALESCE(t.business_share_percent,-1) >= 0
+              THEN t.business_share_percent
+            ELSE ?
+          END) / 100.0
+        ),0) v
+        FROM personal_journal_lines l
+        JOIN personal_transactions t ON t.id=l.transaction_id
+        WHERE l.account_id=?
+      ''', [share, personalId]);
       final b = await d.rawQuery(
         'SELECT COALESCE(SUM(credit-debit),0) v FROM journal_lines WHERE account_id=?',
         [businessId],
       );
-      final target = (p.first['v'] as num).toDouble() * share / 100;
+      final target = (p.first['v'] as num).toDouble();
       final current = (b.first['v'] as num).toDouble();
       final diff = target - current;
       if (diff.abs() <= .005) continue;
@@ -925,7 +1020,10 @@ class FinanceV26Store {
     ''');
   }
 
-  static Future<void> linkPersonalCard(int personalAccountId) async {
+  static Future<void> linkPersonalCard(
+    int personalAccountId, {
+    double businessSharePercent = 100,
+  }) async {
     await ensureSchema();
     final d = await AppDatabase.instance.db;
     final rows = await d.query(
@@ -942,13 +1040,20 @@ class FinanceV26Store {
       'liability',
       'credit_card',
     );
+    final share = businessSharePercent.clamp(0, 100).toDouble();
     await d.rawInsert('''
       INSERT INTO v26_business_cards(
         personal_account_id,business_account_id,business_share_percent,created_at
-      ) VALUES(?,?,100,?)
+      ) VALUES(?,?,?,?)
       ON CONFLICT(personal_account_id) DO UPDATE SET
-        business_account_id=excluded.business_account_id
-    ''', [personalAccountId, businessId, DateTime.now().toIso8601String()]);
+        business_account_id=excluded.business_account_id,
+        business_share_percent=excluded.business_share_percent
+    ''', [
+      personalAccountId,
+      businessId,
+      share,
+      DateTime.now().toIso8601String(),
+    ]);
     await reconcileSharedBalances();
   }
 
@@ -1017,18 +1122,91 @@ class FinanceV26Store {
 
   static Future<void> linkPersonalBank(
     int personalAccountId,
-    int businessAccountId,
+    int businessAccountId, {
+    double businessSharePercent = 100,
+  }) async {
+    await ensureSchema();
+    final d = await AppDatabase.instance.db;
+    final share = businessSharePercent.clamp(0, 100).toDouble();
+    await d.rawInsert('''
+      INSERT INTO v26_personal_business_links(
+        personal_account_id,business_account_id,link_kind,enabled,
+        business_share_percent,created_at
+      ) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(personal_account_id) DO UPDATE SET
+        business_account_id=excluded.business_account_id,
+        enabled=1,
+        business_share_percent=excluded.business_share_percent
+    ''', [
+      personalAccountId,
+      businessAccountId,
+      'bank',
+      1,
+      share,
+      DateTime.now().toIso8601String(),
+    ]);
+    await reconcileSharedBalances();
+  }
+
+  static Future<void> updatePersonalBankShare(
+    int personalAccountId,
+    double share,
   ) async {
     await ensureSchema();
     final d = await AppDatabase.instance.db;
-    await d.rawInsert('''
-      INSERT INTO v26_personal_business_links(
-        personal_account_id,business_account_id,link_kind,enabled,created_at
-      ) VALUES(?,?,?,?,?)
-      ON CONFLICT(personal_account_id) DO UPDATE SET
-        business_account_id=excluded.business_account_id,
-        enabled=1
-    ''', [personalAccountId, businessAccountId, 'bank', 1, DateTime.now().toIso8601String()]);
+    await d.update(
+      'v26_personal_business_links',
+      {'business_share_percent': share.clamp(0, 100).toDouble()},
+      where: 'personal_account_id=?',
+      whereArgs: [personalAccountId],
+    );
+    await reconcileSharedBalances();
+  }
+
+  static Future<void> updatePersonalCardShare(
+    int personalAccountId,
+    double share,
+  ) async {
+    await ensureSchema();
+    final d = await AppDatabase.instance.db;
+    await d.update(
+      'v26_business_cards',
+      {'business_share_percent': share.clamp(0, 100).toDouble()},
+      where: 'personal_account_id=?',
+      whereArgs: [personalAccountId],
+    );
+    await reconcileSharedBalances();
+  }
+
+  static Future<List<Map<String, dynamic>>>
+      personalMovementsForClassification() async {
+    await ensureSchema();
+    final d = await AppDatabase.instance.db;
+    return d.rawQuery('''
+      SELECT t.id,t.date,t.description,t.reference,t.business_share_percent,
+             COALESCE(SUM(l.debit),0) amount
+      FROM personal_transactions t
+      LEFT JOIN personal_journal_lines l ON l.transaction_id=t.id
+      GROUP BY t.id
+      ORDER BY t.date DESC,t.id DESC
+      LIMIT 80
+    ''');
+  }
+
+  static Future<void> setPersonalMovementBusinessShare(
+    int transactionId,
+    double? share,
+  ) async {
+    await ensureSchema();
+    final value =
+        share == null ? -1.0 : share.clamp(0, 100).toDouble();
+    final d = await AppDatabase.instance.db;
+    await d.update(
+      'personal_transactions',
+      {'business_share_percent': value},
+      where: 'id=?',
+      whereArgs: [transactionId],
+    );
     await reconcileSharedBalances();
   }
 
@@ -1109,7 +1287,294 @@ class FinanceV26Store {
       debitCode: personalToBusiness ? 'P1050' : pCode,
       creditCode: personalToBusiness ? pCode : 'P1050',
       reference: ref,
+      businessSharePercent: 100,
     );
+  }
+
+  static Future<List<Map<String, dynamic>>> loans() async {
+    await ensureSchema();
+    final d = await AppDatabase.instance.db;
+    return d.rawQuery('''
+      SELECT l.*,a.name AS receive_account_name,
+        COALESCE((
+          SELECT SUM(p.interest_amount)
+          FROM v27_loan_payments p WHERE p.loan_id=l.id
+        ),0) AS interest_paid
+      FROM v27_loans l
+      JOIN accounts a ON a.id=l.receive_account_id
+      ORDER BY CASE l.status WHEN 'active' THEN 0 ELSE 1 END,
+               l.due_date,l.id DESC
+    ''');
+  }
+
+  static Future<int> createLoan({
+    required String lender,
+    required double principal,
+    required double annualRate,
+    required String interestType,
+    required String compounding,
+    required DateTime startDate,
+    required DateTime dueDate,
+    required int receiveAccountId,
+    String note = '',
+  }) async {
+    await ensureSchema();
+    if (lender.trim().isEmpty || principal <= 0) {
+      throw const FormatException('Indica prestamista y principal.');
+    }
+    if (annualRate < 0) {
+      throw const FormatException('La tasa no puede ser negativa.');
+    }
+    if (!dueDate.isAfter(startDate)) {
+      throw const FormatException(
+        'El vencimiento debe ser posterior al inicio.',
+      );
+    }
+    final d = await AppDatabase.instance.db;
+    final asset = await d.query(
+      'accounts',
+      columns: ['id','type','subtype'],
+      where: 'id=?',
+      whereArgs: [receiveAccountId],
+      limit: 1,
+    );
+    if (asset.isEmpty ||
+        asset.first['type']?.toString() != 'asset' ||
+        !const {'cash','bank','personal_bank'}
+            .contains(asset.first['subtype']?.toString())) {
+      throw const FormatException('Selecciona dónde recibiste el dinero.');
+    }
+    final loanAccount = await AppDatabase.instance.accountId('2500');
+    return d.transaction((tx) async {
+      final id = await tx.insert('v27_loans', {
+        'lender': lender.trim(),
+        'principal': principal,
+        'outstanding_principal': principal,
+        'annual_rate': annualRate,
+        'interest_type': interestType,
+        'compounding': interestType == 'compound' ? compounding : '',
+        'start_date': startDate.toIso8601String(),
+        'due_date': dueDate.toIso8601String(),
+        'receive_account_id': receiveAccountId,
+        'note': note.trim(),
+        'status': 'active',
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      await _insertTx(
+        tx,
+        description: 'Préstamo recibido #$id · ${lender.trim()}',
+        reference: 'V27LOAN:$id:OPEN',
+        cashFlowClass: 'financing',
+        date: startDate,
+        lines: [
+          JournalLine(accountId: receiveAccountId, debit: principal),
+          JournalLine(accountId: loanAccount, credit: principal),
+        ],
+      );
+      return id;
+    });
+  }
+
+  static Future<void> addLoanPayment({
+    required int loanId,
+    required double principalAmount,
+    required double interestAmount,
+    required int paymentAccountId,
+    required DateTime date,
+    String note = '',
+  }) async {
+    await ensureSchema();
+    if (principalAmount < 0 ||
+        interestAmount < 0 ||
+        principalAmount + interestAmount <= 0) {
+      throw const FormatException(
+        'Indica principal y/o interés del pago.',
+      );
+    }
+    final d = await AppDatabase.instance.db;
+    final rows = await d.query(
+      'v27_loans',
+      where: 'id=?',
+      whereArgs: [loanId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      throw const FormatException('El préstamo ya no existe.');
+    }
+    final loan = rows.first;
+    final outstanding =
+        ((loan['outstanding_principal'] as num?) ?? 0).toDouble();
+    if (principalAmount > outstanding + .005) {
+      throw FormatException(
+        'El principal pagado supera el pendiente '
+        '(${outstanding.toStringAsFixed(2)}).',
+      );
+    }
+    final account = await d.query(
+      'accounts',
+      columns: ['id','type','subtype'],
+      where: 'id=?',
+      whereArgs: [paymentAccountId],
+      limit: 1,
+    );
+    if (account.isEmpty ||
+        account.first['type']?.toString() != 'asset' ||
+        !const {'cash','bank','personal_bank'}
+            .contains(account.first['subtype']?.toString())) {
+      throw const FormatException(
+        'Selecciona la cuenta desde la que pagaste.',
+      );
+    }
+    final loanAccount = await AppDatabase.instance.accountId('2500');
+    final interestExpense = await AppDatabase.instance.accountId('7010');
+    final total = principalAmount + interestAmount;
+    final ref =
+        'V27LOAN:$loanId:PAY:${DateTime.now().microsecondsSinceEpoch}';
+    await d.transaction((tx) async {
+      await _insertTx(
+        tx,
+        description: 'Pago préstamo #$loanId · ${loan['lender']}',
+        reference: ref,
+        cashFlowClass: 'financing',
+        date: date,
+        lines: [
+          if (principalAmount > .005)
+            JournalLine(accountId: loanAccount, debit: principalAmount),
+          if (interestAmount > .005)
+            JournalLine(accountId: interestExpense, debit: interestAmount),
+          JournalLine(accountId: paymentAccountId, credit: total),
+        ],
+      );
+      await tx.insert('v27_loan_payments', {
+        'loan_id': loanId,
+        'principal_amount': principalAmount,
+        'interest_amount': interestAmount,
+        'payment_account_id': paymentAccountId,
+        'date': date.toIso8601String(),
+        'note': note.trim(),
+        'reference': ref,
+      });
+      final newOutstanding =
+          math.max(0.0, outstanding - principalAmount);
+      await tx.update(
+        'v27_loans',
+        {
+          'outstanding_principal': newOutstanding,
+          'status': newOutstanding <= .005 ? 'paid' : 'active',
+        },
+        where: 'id=?',
+        whereArgs: [loanId],
+      );
+    });
+  }
+
+  static Future<List<Map<String, dynamic>>> loanPayments(int loanId) async {
+    await ensureSchema();
+    final d = await AppDatabase.instance.db;
+    return d.rawQuery('''
+      SELECT p.*,a.name AS payment_account_name
+      FROM v27_loan_payments p
+      JOIN accounts a ON a.id=p.payment_account_id
+      WHERE p.loan_id=?
+      ORDER BY p.date DESC,p.id DESC
+    ''', [loanId]);
+  }
+
+  static Future<void> deleteLoanPayment(
+    Map<String, dynamic> payment,
+  ) async {
+    await ensureSchema();
+    final d = await AppDatabase.instance.db;
+    final loanId = payment['loan_id'] as int;
+    final principal = (payment['principal_amount'] as num).toDouble();
+    final ref = payment['reference'].toString();
+    await d.transaction((tx) async {
+      final ids = await tx.query(
+        'transactions',
+        columns: ['id'],
+        where: 'reference=?',
+        whereArgs: [ref],
+      );
+      for (final row in ids) {
+        await tx.delete(
+          'journal_lines',
+          where: 'transaction_id=?',
+          whereArgs: [row['id']],
+        );
+      }
+      await tx.delete(
+        'transactions',
+        where: 'reference=?',
+        whereArgs: [ref],
+      );
+      await tx.delete(
+        'v27_loan_payments',
+        where: 'id=?',
+        whereArgs: [payment['id']],
+      );
+      final loanRows = await tx.query(
+        'v27_loans',
+        where: 'id=?',
+        whereArgs: [loanId],
+        limit: 1,
+      );
+      if (loanRows.isNotEmpty) {
+        final current =
+            ((loanRows.first['outstanding_principal'] as num?) ?? 0)
+                .toDouble();
+        final original =
+            (loanRows.first['principal'] as num).toDouble();
+        final restored = math.min(original, current + principal);
+        await tx.update(
+          'v27_loans',
+          {
+            'outstanding_principal': restored,
+            'status': restored <= .005 ? 'paid' : 'active',
+          },
+          where: 'id=?',
+          whereArgs: [loanId],
+        );
+      }
+    });
+  }
+
+  static Future<void> deleteLoan(int loanId) async {
+    await ensureSchema();
+    final d = await AppDatabase.instance.db;
+    final payments = await d.query(
+      'v27_loan_payments',
+      where: 'loan_id=?',
+      whereArgs: [loanId],
+    );
+    for (final payment in payments) {
+      await deleteLoanPayment(Map<String, dynamic>.from(payment));
+    }
+    await d.transaction((tx) async {
+      final openRef = 'V27LOAN:$loanId:OPEN';
+      final ids = await tx.query(
+        'transactions',
+        columns: ['id'],
+        where: 'reference=?',
+        whereArgs: [openRef],
+      );
+      for (final row in ids) {
+        await tx.delete(
+          'journal_lines',
+          where: 'transaction_id=?',
+          whereArgs: [row['id']],
+        );
+      }
+      await tx.delete(
+        'transactions',
+        where: 'reference=?',
+        whereArgs: [openRef],
+      );
+      await tx.delete(
+        'v27_loans',
+        where: 'id=?',
+        whereArgs: [loanId],
+      );
+    });
   }
 
   static Future<void> deletePersonalTransaction(int id) async {
