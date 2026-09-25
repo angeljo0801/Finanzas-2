@@ -1320,6 +1320,7 @@ class _V26RemittancesPageState extends State<V26RemittancesPage> {
         .where((r) => r['subtype']?.toString() != 'cash')
         .toList();
     final personalBanks = await FinanceV26Store.personalLiquidAccounts();
+    final agentNames = await FinanceV26Store.agentNames();
     if (!mounted) return;
     final client = TextEditingController();
     final principal = TextEditingController();
@@ -1328,6 +1329,8 @@ class _V26RemittancesPageState extends State<V26RemittancesPage> {
     var kind = 'own';
     var bankScope = 'business';
     var custom = false;
+    var useCustomAgent = agentNames.isEmpty;
+    String? selectedAgent = agentNames.isEmpty ? null : agentNames.first;
     int? businessBank = businessBanks.isEmpty ? null : businessBanks.first['id'] as int;
     int? personalBank = personalBanks.isEmpty ? null : personalBanks.first['id'] as int;
 
@@ -1348,8 +1351,49 @@ class _V26RemittancesPageState extends State<V26RemittancesPage> {
               ),
               TextField(controller: client, decoration: const InputDecoration(labelText: 'Cliente o referencia')),
               TextField(controller: principal, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Dinero entregado')),
-              if (kind == 'agent')
-                TextField(controller: agent, decoration: const InputDecoration(labelText: 'Agente')),
+              if (kind == 'agent') ...[
+                if (!useCustomAgent && agentNames.isNotEmpty)
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedAgent,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Agente registrado',
+                    ),
+                    items: agentNames
+                        .map(
+                          (name) => DropdownMenuItem(
+                            value: name,
+                            child: Text(name),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) setD(() => selectedAgent = v);
+                    },
+                  ),
+                if (useCustomAgent)
+                  TextField(
+                    controller: agent,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre del agente',
+                    ),
+                  ),
+                TextButton.icon(
+                  onPressed: () => setD(
+                    () => useCustomAgent = !useCustomAgent,
+                  ),
+                  icon: Icon(
+                    useCustomAgent
+                        ? Icons.list_alt_outlined
+                        : Icons.person_add_alt_1,
+                  ),
+                  label: Text(
+                    useCustomAgent
+                        ? 'Elegir agente registrado'
+                        : 'Usar otro / nuevo agente',
+                  ),
+                ),
+              ],
               if (kind == 'own')
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -1401,7 +1445,9 @@ class _V26RemittancesPageState extends State<V26RemittancesPage> {
         client: client.text,
         kind: kind,
         principal: _n26(principal.text),
-        agent: agent.text,
+        agent: kind == 'agent'
+            ? (useCustomAgent ? agent.text : (selectedAgent ?? ''))
+            : '',
         customPercent: custom ? _n26(customPercent.text) : null,
         bankScope: bankScope,
         bankAccountId: businessBank,
@@ -1466,6 +1512,7 @@ class _PersonalBusinessSyncPageState extends State<PersonalBusinessSyncPage> {
   List<Map<String, dynamic>> personal = const [];
   List<Map<String, dynamic>> business = const [];
   List<Map<String, dynamic>> links = const [];
+  List<Map<String, dynamic>> movements = const [];
 
   @override
   void initState() {
@@ -1478,13 +1525,24 @@ class _PersonalBusinessSyncPageState extends State<PersonalBusinessSyncPage> {
     final p = await FinanceV26Store.personalLiquidAccounts();
     final b = await FinanceV26Store.businessLiquidAccounts();
     final l = await FinanceV26Store.links();
-    if (mounted) setState(() { enabled = e; personal = p; business = b; links = l; loading = false; });
+    final m = await FinanceV26Store.personalMovementsForClassification();
+    if (mounted) {
+      setState(() {
+        enabled = e;
+        personal = p;
+        business = b;
+        links = l;
+        movements = m;
+        loading = false;
+      });
+    }
   }
 
   Future<void> _link() async {
     if (personal.isEmpty || business.isEmpty) return;
     int p = personal.first['id'] as int;
     int b = business.first['id'] as int;
+    final share = TextEditingController(text: '100');
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -1504,6 +1562,16 @@ class _PersonalBusinessSyncPageState extends State<PersonalBusinessSyncPage> {
             items: business.map((r) => DropdownMenuItem(value: r['id'] as int, child: Text(r['name'].toString()))).toList(),
             onChanged: (v) { if (v != null) b = v; },
           ),
+          TextField(
+            controller: share,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Uso predeterminado del negocio',
+              suffixText: '%',
+              helperText: 'Después puedes clasificar cada movimiento por separado.',
+            ),
+          ),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
@@ -1512,9 +1580,159 @@ class _PersonalBusinessSyncPageState extends State<PersonalBusinessSyncPage> {
       ),
     );
     if (ok == true) {
-      await FinanceV26Store.linkPersonalBank(p, b);
+      await FinanceV26Store.linkPersonalBank(
+        p,
+        b,
+        businessSharePercent: _n26(share.text),
+      );
       await _load();
     }
+  }
+
+  Future<void> _editBankShare(Map<String, dynamic> row) async {
+    final controller = TextEditingController(
+      text: _m26((row['business_share_percent'] as num?) ?? 100),
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Uso predeterminado por el negocio'),
+        content: TextField(
+          controller: controller,
+          keyboardType:
+              const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Porcentaje',
+            suffixText: '%',
+            helperText: 'Se usa cuando el movimiento no tiene clasificación propia.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await FinanceV26Store.updatePersonalBankShare(
+        row['personal_account_id'] as int,
+        _n26(controller.text),
+      );
+      await _load();
+      widget.onChanged();
+    }
+    controller.dispose();
+  }
+
+  Future<void> _classifyMovement(Map<String, dynamic> row) async {
+    final raw =
+        ((row['business_share_percent'] as num?) ?? -1).toDouble();
+    var mode = raw < 0
+        ? 'inherit'
+        : raw <= .005
+            ? 'personal'
+            : raw >= 99.995
+                ? 'business'
+                : 'split';
+    final custom = TextEditingController(
+      text: raw > 0 && raw < 100 ? _m26(raw) : '50',
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setD) => AlertDialog(
+          title: const Text('Clasificar movimiento'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text(
+                row['description'].toString(),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                initialValue: mode,
+                decoration: const InputDecoration(labelText: 'Uso'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'inherit',
+                    child: Text('Usar porcentaje de la cuenta'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'personal',
+                    child: Text('100% Personal'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'business',
+                    child: Text('100% Negocio'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'split',
+                    child: Text('Dividir por porcentaje'),
+                  ),
+                ],
+                onChanged: (v) {
+                  if (v != null) setD(() => mode = v);
+                },
+              ),
+              if (mode == 'split')
+                TextField(
+                  controller: custom,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Porcentaje del negocio',
+                    suffixText: '%',
+                  ),
+                ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Aplicar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok == true) {
+      double? share;
+      if (mode == 'personal') {
+        share = 0;
+      } else if (mode == 'business') {
+        share = 100;
+      } else if (mode == 'split') {
+        share = _n26(custom.text);
+      } else {
+        share = null;
+      }
+      await FinanceV26Store.setPersonalMovementBusinessShare(
+        row['id'] as int,
+        share,
+      );
+      await _load();
+      widget.onChanged();
+    }
+    custom.dispose();
+  }
+
+  String _movementShareLabel(Map<String, dynamic> row) {
+    final value =
+        ((row['business_share_percent'] as num?) ?? -1).toDouble();
+    if (value < 0) return 'Hereda el % de la cuenta';
+    if (value <= .005) return 'Personal';
+    if (value >= 99.995) return 'Negocio';
+    return 'Negocio ${_m26(value)}%';
   }
 
   Future<void> _transfer() async {
@@ -1623,14 +1841,62 @@ class _PersonalBusinessSyncPageState extends State<PersonalBusinessSyncPage> {
                   for (final row in links)
                     ListTile(
                       leading: const Icon(Icons.account_balance_outlined),
-                      title: Text('${row['personal_name']} → ${row['business_name']}'),
-                      subtitle: Text(row['bank_name']?.toString() ?? ''),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.link_off),
-                        onPressed: () async {
-                          await FinanceV26Store.unlinkPersonalBank(row['personal_account_id'] as int);
-                          await _load();
+                      title: Text(
+                        '${row['personal_name']} → ${row['business_name']}',
+                      ),
+                      subtitle: Text(
+                        '${row['bank_name']?.toString() ?? ''} · '
+                        'Negocio ${_m26((row['business_share_percent'] as num?) ?? 100)}%',
+                      ),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (v) async {
+                          if (v == 'share') {
+                            await _editBankShare(row);
+                          } else if (v == 'unlink') {
+                            await FinanceV26Store.unlinkPersonalBank(
+                              row['personal_account_id'] as int,
+                            );
+                            await _load();
+                            widget.onChanged();
+                          }
                         },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'share',
+                            child: Text('Cambiar % del negocio'),
+                          ),
+                          PopupMenuItem(
+                            value: 'unlink',
+                            child: Text('Desvincular'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const Divider(height: 28),
+                  Text(
+                    'Clasificar movimientos',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const Text(
+                    'Cada movimiento puede ser Personal, Negocio o dividido. '
+                    'Si lo dejas en automático, usa el porcentaje de la cuenta vinculada.',
+                  ),
+                  const SizedBox(height: 8),
+                  if (movements.isEmpty)
+                    const ListTile(
+                      title: Text('No hay movimientos personales recientes.'),
+                    ),
+                  for (final row in movements.take(30))
+                    ListTile(
+                      leading: const Icon(Icons.rule_folder_outlined),
+                      title: Text(row['description'].toString()),
+                      subtitle: Text(_movementShareLabel(row)),
+                      trailing: IconButton(
+                        tooltip: 'Clasificar',
+                        icon: const Icon(Icons.tune),
+                        onPressed: () => _classifyMovement(row),
                       ),
                     ),
                   const Divider(height: 28),
