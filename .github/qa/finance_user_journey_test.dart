@@ -326,21 +326,27 @@ void main() {
     // 10) El formulario de Intereses pide tasa y tipo.
     await tester.tap(find.text('Deudas').last);
     await tester.pumpAndSettle();
-    final fab = find.byType(FloatingActionButton);
-    expect(fab, findsOneWidget);
-    await tester.tap(fab);
-    await tester.pumpAndSettle();
-    expect(find.text('Yo debo pagar'), findsOneWidget);
-    // "Nota opcional" solo existe en el flujo V26; si falta, la app cayó
-    // accidentalmente en la pantalla de deudas antigua.
-    expect(find.text('Nota opcional'), findsOneWidget);
+    expect(
+      find.byKey(const Key('v26_debts_page')),
+      findsOneWidget,
+      reason: 'Planificación debe usar la pantalla V26 de deudas.',
+    );
 
-    final payableCategories = await FinanceV26Store.categories('payable');
-    expect(payableCategories, isNotEmpty);
-    final firstCategoryName = payableCategories.first['name'].toString();
-    final currentCategoryLabel = find.text(firstCategoryName).last;
-    expect(currentCategoryLabel, findsOneWidget);
-    await tester.tap(currentCategoryLabel);
+    final debtFab = find.byKey(const Key('v26_debt_add'));
+    expect(debtFab, findsOneWidget);
+    await tester.tap(debtFab);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('debt_note_field')),
+      findsOneWidget,
+      reason: 'El diálogo V26 debe incluir la nota y los datos avanzados.',
+    );
+
+    final debtCategory = find.byKey(const Key('debt_category_dropdown'));
+    expect(debtCategory, findsOneWidget);
+    await tester.ensureVisible(debtCategory);
+    await tester.tap(debtCategory);
     await tester.pumpAndSettle();
     final interestOption = find.text('Intereses').last;
     expect(interestOption, findsOneWidget);
@@ -356,7 +362,14 @@ void main() {
     // 11) Remesas muestran los dos tipos y banco destino.
     await tester.tap(find.text('Remesas').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(FloatingActionButton));
+    expect(
+      find.byKey(const Key('v26_remittances_page')),
+      findsOneWidget,
+      reason: 'Planificación debe usar la pantalla V26 de remesas.',
+    );
+    final remitFab = find.byKey(const Key('v26_remittance_add'));
+    expect(remitFab, findsOneWidget);
+    await tester.tap(remitFab);
     await tester.pumpAndSettle();
     expect(find.text('Registrar remesa'), findsOneWidget);
     expect(find.text('Remesa mía'), findsOneWidget);
