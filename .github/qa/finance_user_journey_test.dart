@@ -7,6 +7,22 @@ import 'package:finanzas_definitiva/finance_v26_store.dart';
 import 'package:finanzas_definitiva/main.dart';
 import 'package:finanzas_definitiva/personal_finance.dart';
 
+Future<void> _pumpUntilVisible(
+  WidgetTester tester,
+  Finder finder, {
+  int attempts = 60,
+}) async {
+  for (var i = 0; i < attempts; i++) {
+    await tester.pump(const Duration(milliseconds: 100));
+    if (finder.evaluate().isNotEmpty) return;
+  }
+  expect(
+    finder,
+    findsOneWidget,
+    reason: 'El control esperado no apareció después de esperar la operación asíncrona.',
+  );
+}
+
 Future<double> _businessAssetBalance(String code) async {
   final d = await AppDatabase.instance.db;
   final account = await d.query(
@@ -335,10 +351,11 @@ void main() {
     final debtFab = find.byKey(const Key('v26_debt_add'));
     expect(debtFab, findsOneWidget);
     await tester.tap(debtFab);
-    await tester.pumpAndSettle();
+    final debtNote = find.byKey(const Key('debt_note_field'));
+    await _pumpUntilVisible(tester, debtNote);
 
     expect(
-      find.byKey(const Key('debt_note_field')),
+      debtNote,
       findsOneWidget,
       reason: 'El diálogo V26 debe incluir la nota y los datos avanzados.',
     );
@@ -370,7 +387,7 @@ void main() {
     final remitFab = find.byKey(const Key('v26_remittance_add'));
     expect(remitFab, findsOneWidget);
     await tester.tap(remitFab);
-    await tester.pumpAndSettle();
+    await _pumpUntilVisible(tester, find.text('Registrar remesa'));
     expect(find.text('Registrar remesa'), findsOneWidget);
     expect(find.text('Remesa mía'), findsOneWidget);
     expect(find.text('De agente'), findsOneWidget);
@@ -385,7 +402,7 @@ void main() {
     expect(find.text('Regla de remesas'), findsOneWidget);
     expect(find.text('Sincronización Personal ↔ Negocio'), findsOneWidget);
     await tester.tap(find.text('Regla de remesas'));
-    await tester.pumpAndSettle();
+    await _pumpUntilVisible(tester, find.text('Mis remesas'));
     final rulesList = find.byType(ListView);
     expect(rulesList, findsOneWidget);
     await tester.drag(rulesList, const Offset(0, -500));
