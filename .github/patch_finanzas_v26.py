@@ -136,10 +136,15 @@ main.write_text(s, encoding="utf-8")
 m = manager.read_text(encoding="utf-8")
 if "import 'finance_v26_ui.dart';" not in m:
     m = m.replace("import 'models.dart';", "import 'models.dart';\nimport 'finance_v26_ui.dart';", 1)
-m = m.replace(
-    "DebtsPage(onChanged:widget.onChanged),RemittancesPage(onChanged:widget.onChanged)",
+m, plan_count = re.subn(
+    r"DebtsPage\s*\(\s*onChanged\s*:\s*widget\.onChanged\s*\)\s*,\s*"
+    r"RemittancesPage\s*\(\s*onChanged\s*:\s*widget\.onChanged\s*\)",
     "V26DebtsPage(onChanged:widget.onChanged),V26RemittancesPage(onChanged:widget.onChanged)",
+    m,
+    count=1,
 )
+if plan_count != 1 or "V26DebtsPage(onChanged:widget.onChanged)" not in m:
+    raise SystemExit("No se pudo activar V26DebtsPage/V26RemittancesPage en Planificación")
 manager.write_text(m, encoding="utf-8")
 
 # ---- Unified AI surface ----
