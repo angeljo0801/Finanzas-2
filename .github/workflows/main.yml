@@ -1,4 +1,4 @@
-name: Compilar Finanzas Definitiva v2.6.4 Oficial
+name: Compilar Finanzas Definitiva v2.7.0 Oficial
 
 on:
   workflow_dispatch:
@@ -11,6 +11,7 @@ on:
       - ".github/finance_v26_store.dart"
       - ".github/finance_v26_ui.dart"
       - ".github/patch_personal_wallet_v262.py"
+      - ".github/patch_finanzas_v27.py"
       - ".github/qa/finance_logic_qa_test.dart"
       - ".github/qa/audit_finanzas.py"
       - ".github/qa/finance_user_journey_test.dart"
@@ -105,6 +106,7 @@ jobs:
           python3 .github/patch_finanzas_compat_v4.py
           python3 .github/patch_finanzas_v26.py
           python3 .github/patch_personal_wallet_v262.py
+          python3 .github/patch_finanzas_v27.py
 
           mkdir -p finanzas_definitiva/test finanzas_definitiva/integration_test
           cp .github/qa/finance_logic_qa_test.dart finanzas_definitiva/test/finance_logic_qa_test.dart
@@ -182,7 +184,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: cd finanzas_definitiva && flutter test integration_test/finance_user_journey_test.dart -d emulator-5554 --reporter expanded
 
-      - name: Compilar Finanzas Definitiva v2.6.4
+      - name: Compilar Finanzas Definitiva v2.7.0
         working-directory: finanzas_definitiva
         shell: bash
         run: |
@@ -218,10 +220,10 @@ jobs:
             --ks-key-alias "$KEY_ALIAS" \
             --ks-pass "pass:$STORE_PASSWORD" \
             --key-pass "pass:$KEY_PASSWORD" \
-            --out build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.4.apk \
+            --out build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.7.0.apk \
             build/app/outputs/flutter-apk/app-release.apk
 
-          "$APKSIGNER" verify --verbose --print-certs build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.4.apk
+          "$APKSIGNER" verify --verbose --print-certs build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.7.0.apk
           rm -f android/finanzas-release.jks
 
       - name: Guardar identidad final
@@ -229,7 +231,7 @@ jobs:
         run: |
           {
             echo "applicationId=$FINANZAS_APPLICATION_ID"
-            echo "versionName=2.6.4"
+            echo "versionName=2.7.0"
             echo "buildNumber=$FINANZAS_BUILD_NUMBER"
             echo "signing=persistent"
             echo "source=angeljo0801/Negocio"
@@ -239,9 +241,9 @@ jobs:
       - name: Subir Finanzas Definitiva oficial
         uses: actions/upload-artifact@v4
         with:
-          name: Finanzas-Definitiva-v2.6.4-Official
+          name: Finanzas-Definitiva-v2.7.0-Official
           path: |
-            finanzas_definitiva/build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.6.4.apk
+            finanzas_definitiva/build/app/outputs/flutter-apk/Finanzas-Definitiva-v2.7.0.apk
             finanzas_definitiva/build/app/outputs/flutter-apk/BUILD_IDENTITY.txt
             QA_REPORT.md
             QA_REPORT.json
