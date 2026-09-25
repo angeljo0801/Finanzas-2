@@ -427,6 +427,7 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
                   ),
                 ],
                 TextField(
+                  key: const Key('debt_note_field'),
                   controller: note,
                   decoration:
                       const InputDecoration(labelText: 'Nota opcional'),
@@ -733,6 +734,7 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
 
   @override
   Widget build(BuildContext context) => Column(
+        key: const Key('v26_debts_page'),
         children: [
           Padding(
             padding: const EdgeInsets.all(10),
@@ -871,7 +873,12 @@ class _V26RemittancesPageState extends State<V26RemittancesPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        floatingActionButton: FloatingActionButton(onPressed: _add, child: const Icon(Icons.add)),
+        key: const Key('v26_remittances_page'),
+        floatingActionButton: FloatingActionButton(
+          key: const Key('v26_remittance_add'),
+          onPressed: _add,
+          child: const Icon(Icons.add),
+        ),
         body: rows.isEmpty
             ? const Center(child: Text('Registra una remesa mía o de un agente.'))
             : ListView(
