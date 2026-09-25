@@ -23,6 +23,29 @@ Future<void> _pumpUntilVisible(
   );
 }
 
+Future<void> _dragUntilVisible(
+  WidgetTester tester,
+  Finder target,
+  Finder scrollable, {
+  int attempts = 8,
+  double delta = -280,
+}) async {
+  for (var i = 0; i < attempts; i++) {
+    if (target.evaluate().isNotEmpty) {
+      await tester.ensureVisible(target);
+      await tester.pumpAndSettle();
+      return;
+    }
+    await tester.drag(scrollable, Offset(0, delta));
+    await tester.pumpAndSettle();
+  }
+  expect(
+    target,
+    findsOneWidget,
+    reason: 'No se pudo llegar al control esperado desplazando la pantalla.',
+  );
+}
+
 Future<double> _businessAssetBalance(String code) async {
   final d = await AppDatabase.instance.db;
   final account = await d.query(
@@ -404,13 +427,10 @@ void main() {
     expect(settingsList, findsOneWidget);
 
     final rulesEntry = find.byKey(const Key('settings_remittance_rules'));
-    await tester.scrollUntilVisible(
+    await _dragUntilVisible(
+      tester,
       rulesEntry,
-      250,
-      scrollable: find.descendant(
-        of: settingsList,
-        matching: find.byType(Scrollable),
-      ),
+      settingsList,
     );
     expect(rulesEntry, findsOneWidget);
 
