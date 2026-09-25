@@ -1085,7 +1085,10 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
               ListTile(
                 leading: const Icon(Icons.payments_outlined),
                 title: Text(_m26(p['amount'] as num)),
-                subtitle: Text(DateFormat('dd/MM/yyyy').format(DateTime.parse(p['date'].toString()))),
+                subtitle: Text(
+                  '${p['money_account_name']?.toString().isNotEmpty == true ? '${p['money_account_name']} · ' : ''}'
+                  '${DateFormat('dd/MM/yyyy').format(DateTime.parse(p['date'].toString()))}',
+                ),
                 trailing: IconButton(
                   icon: const Icon(Icons.delete_outline),
                   onPressed: () async {
