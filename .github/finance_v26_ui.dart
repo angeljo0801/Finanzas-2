@@ -608,7 +608,11 @@ class _V26DebtsPageState extends State<V26DebtsPage> {
   Widget _debtList(String kind) {
     final list = debts.where((r) => r['kind'] == kind).toList();
     return Scaffold(
-      floatingActionButton: FloatingActionButton(onPressed: () => _addDebt(kind), child: const Icon(Icons.add)),
+      floatingActionButton: FloatingActionButton(
+        key: const Key('v26_debt_add'),
+        onPressed: () => _addDebt(kind),
+        child: const Icon(Icons.add),
+      ),
       body: list.isEmpty
           ? Center(child: Text(kind == 'payable' ? 'No tienes deudas por pagar.' : 'No tienes cuentas por cobrar.'))
           : ListView(
